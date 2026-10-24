@@ -1,0 +1,37 @@
+{
+  "categories" : [
+    "Learning & Ideas"
+  ],
+  "created" : "2026-10-24T14:30:12Z",
+  "favorite" : false,
+  "gist" : "Why entanglement puzzled Einstein and what the experiments showed.",
+  "lecture" : {
+    "characters" : 9840,
+    "claude_cost" : 0.21,
+    "dollars_per_thousand_credits" : 0.18,
+    "estimated_claude_cost" : 0.197,
+    "minutes" : 10,
+    "model" : "claude-sonnet-5-5",
+    "summary" : "Why entanglement puzzled Einstein and what the experiments showed.",
+    "topic" : "the strangeness of quantum entanglement",
+    "web_searches" : 5
+  },
+  "pearls" : [
+    {
+      "audio_file" : "pearl-01-lecture.mp3",
+      "created" : "2026-10-24T14:30:12Z",
+      "id" : "22222222-3333-4444-8555-666666666666",
+      "mode" : "lecture",
+      "number" : 1,
+      "polisher" : "anthropic",
+      "refined_by" : "claude-sonnet-5-5",
+      "text_file" : "pearl-01-lecture.txt",
+      "voice_id" : "VOICE_ID"
+    }
+  ],
+  "references" : [
+
+  ],
+  "title" : "The Strangeness of Quantum Entanglement",
+  "typed" : true
+}

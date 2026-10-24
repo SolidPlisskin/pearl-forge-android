@@ -1,0 +1,50 @@
+{
+  "categories" : [
+    "Personal Growth",
+    "Mind & Emotions"
+  ],
+  "created" : "2026-10-24T14:30:12Z",
+  "favorite" : true,
+  "gist" : "I'm wondering whether I put things off to avoid feeling bad.",
+  "original_file" : "original.m4a",
+  "pearls" : [
+    {
+      "audio_file" : "pearl-01-clean.mp3",
+      "created" : "2026-10-24T14:30:12Z",
+      "id" : "6F1C2B9E-2D4A-4C61-9B0E-1A2B3C4D5E6F",
+      "mode" : "clean",
+      "number" : 1,
+      "polisher" : "anthropic",
+      "refined_by" : "claude-opus-5-5",
+      "text_file" : "pearl-01-clean.txt",
+      "voice_id" : "VOICE_ID"
+    },
+    {
+      "audio_file" : "pearl-02-tighten.mp3",
+      "created" : "2026-10-24T14:40:12Z",
+      "id" : "0A9B8C7D-6E5F-4A3B-8C2D-1E0F9A8B7C6D",
+      "mode" : "tighten",
+      "notes" : "Say it in Italian, the way a native speaker would. keep the bridge analogy",
+      "number" : 2,
+      "polisher" : "openai",
+      "refined_by" : "gpt-5.5",
+      "text_file" : "pearl-02-tighten.txt",
+      "voice_id" : "VOICE_ID"
+    }
+  ],
+  "references" : [
+    {
+      "authors" : "Steel P",
+      "found" : "2026-10-24T14:30:12Z",
+      "id" : "11111111-2222-4333-8444-555555555555",
+      "kind" : "research",
+      "note" : "Links procrastination to impulsiveness and task aversiveness.",
+      "pmid" : "17201571",
+      "source" : "Psychological bulletin",
+      "title" : "The nature of procrastination: a meta-analytic and theoretical review of quintessential self-regulatory failure.",
+      "url" : "https://pubmed.ncbi.nlm.nih.gov/17201571/",
+      "year" : "2007"
+    }
+  ],
+  "title" : "I think there's a decent chance I procrastinate because"
+}
