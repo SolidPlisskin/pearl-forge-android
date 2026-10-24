@@ -216,7 +216,11 @@ class PolishersModel(context: Context, private val store: CredentialStore) {
     fun modelName(id: String, provider: PolisherProvider): String =
         models[provider]?.firstOrNull { it.id == id }?.name
             ?: selectedModelNames[provider]?.takeIf { selectedModels[provider] == id }
+            ?: knownNames[id]
             ?: id
+
+    /** Names for Pearl Forge's usual Claude models, for before the model list has loaded. */
+    private val knownNames = mapOf("claude-opus-5-5" to "Claude Opus 5.5", "claude-sonnet-5-5" to "Claude Sonnet 5.5")
 
     /** "Claude · Claude Opus 5.5" */
     fun label(choice: PolisherChoice) = "${choice.provider.displayName} · ${modelName(choice.model, choice.provider)}"
