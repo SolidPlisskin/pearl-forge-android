@@ -1,7 +1,9 @@
 package com.solidplisskin.pearlforge.pipeline
 
 import java.io.File
+import java.util.Base64
 import java.util.Date
+import kotlinx.coroutines.delay
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import okhttp3.MediaType.Companion.toMediaType
@@ -104,6 +106,49 @@ class ElevenLabsClient(private val apiKey: String, private val base: String = Pi
             audio.write(PipelineHttp.send(request, "Voice generation failed"))
         }
         return audio.toByteArray()
+    }
+
+    // Videos
+
+    /** Starts a lip-synced video of the picture speaking the audio, and returns its id for checkVideo. */
+    suspend fun startLipSyncVideo(picture: ByteArray, audio: ByteArray): String {
+        val encoder = Base64.getEncoder()
+        val body = jsonOf(mapOf(
+            "model_id" to AvatarVideo.MODEL,
+            "resolution" to AvatarVideo.RESOLUTION,
+            "image" to mapOf("type" to "inline_base64", "content_base64" to encoder.encodeToString(picture), "mime_type" to "image/jpeg"),
+            "audio" to mapOf("type" to "inline_base64", "content_base64" to encoder.encodeToString(audio), "mime_type" to "audio/mpeg"),
+        ))
+        val request = Request.Builder().url("$base/flows/video").header("xi-api-key", apiKey)
+            .post(body.toString().toByteArray().toRequestBody("application/json".toMediaType()))
+            .build()
+        val data = PipelineHttp.send(request, "ElevenLabs couldn't start the video", mapOf(402 to AvatarVideo.NEEDS_PRO_MESSAGE))
+        return runCatching { parseJson(data).asObject()?.str("id") }.getOrNull()?.takeIf { it.isNotEmpty() }
+            ?: throw PipelineError("ElevenLabs didn't say which video it started.")
+    }
+
+    /** Where a video ElevenLabs is making has got to. Its download link expires after about an hour, so ask again rather than keeping it. */
+    suspend fun checkVideo(id: String): VideoGeneration {
+        val request = Request.Builder().url("$base/flows/video/$id").header("xi-api-key", apiKey).build()
+        val data = PipelineHttp.send(request, "Couldn't check on the video")
+        val response = runCatching { parseJson(data).asObject() }.getOrNull()
+            ?: throw PipelineError("ElevenLabs' reply about the video couldn't be read.")
+        return when (response.str("status")) {
+            "completed" -> VideoGeneration.Finished(response.str("content_url")?.takeIf { it.isNotEmpty() }
+                ?: throw PipelineError("ElevenLabs finished the video but didn't say where it is."))
+            "failed" -> throw VideoFailed("ElevenLabs couldn't make the video: " + (response.str("error_message") ?: "it didn't say why.") +
+                                          " Failed videos aren't charged.")
+            else -> VideoGeneration.Working
+        }
+    }
+
+    /** Checks on a video until it's finished, then downloads it. */
+    suspend fun waitForVideo(id: String, pollMillis: Long = AvatarVideo.POLL_INTERVAL_MS): ByteArray {
+        while (true) {
+            val state = checkVideo(id)
+            if (state is VideoGeneration.Finished) return PipelineHttp.send(Request.Builder().url(state.url).build(), "Couldn't download the video")
+            delay(pollMillis)
+        }
     }
 
     companion object {

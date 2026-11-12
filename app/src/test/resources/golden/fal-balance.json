@@ -1,0 +1,32 @@
+[
+  {
+    "headers" : {
+      "Authorization" : "Key test-fal-key"
+    },
+    "method" : "GET",
+    "url" : "https://api.fal.ai/v1/account/billing?expand=credits"
+  },
+  {
+    "returned" : "12.34"
+  },
+  {
+    "headers" : {
+      "Authorization" : "Key test-fal-key"
+    },
+    "method" : "GET",
+    "url" : "https://api.fal.ai/v1/account/billing?expand=credits"
+  },
+  {
+    "returned" : "-1.0"
+  },
+  {
+    "headers" : {
+      "Authorization" : "Key test-fal-key"
+    },
+    "method" : "GET",
+    "url" : "https://api.fal.ai/v1/account/billing?expand=credits"
+  },
+  {
+    "error" : "fal.ai didn't accept your key. Check it in Settings › API keys."
+  }
+]

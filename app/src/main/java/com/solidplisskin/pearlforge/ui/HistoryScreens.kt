@@ -1,6 +1,37 @@
 package com.solidplisskin.pearlforge.ui
 
+import android.net.Uri
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.PickVisualMediaRequest
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.selection.SelectionContainer
+import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.Folder
+import androidx.compose.material.icons.filled.GraphicEq
+import androidx.compose.material.icons.filled.HourglassEmpty
+import androidx.compose.material.icons.filled.Keyboard
+import androidx.compose.material.icons.filled.Language
+import androidx.compose.material.icons.filled.Movie
+import androidx.compose.material.icons.filled.PhotoLibrary
+import androidx.compose.material.icons.filled.RecentActors
+import androidx.compose.material.icons.filled.Translate
+import androidx.compose.ui.draw.clip
+import com.solidplisskin.pearlforge.pipeline.AvatarVideo
+import com.solidplisskin.pearlforge.pipeline.VideoModel
+import com.solidplisskin.pearlforge.pipeline.dollars
+import com.solidplisskin.pearlforge.recordings.RecordingLibrary
+import com.solidplisskin.pearlforge.settings.KeyStatus
+import java.text.NumberFormat
+import java.util.Locale
+import kotlin.math.roundToInt
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -72,44 +103,84 @@ import java.io.File
 import java.util.UUID
 import kotlinx.coroutines.launch
 
-/** Every saved recording, newest first, with search and favorites, or gathered by topic. */
+/** What History lists. */
+enum class HistoryMode(val label: String) { RECORDINGS("Recordings"), VIDEOS("Videos"), TOPICS("Topics") }
+
+/** Every saved recording, newest first, with search and favorites; every video you've made; or recordings gathered by topic. */
 @Composable
-fun HistoryList(container: AppContainer, selectedId: String?, open: (HistoryRoute) -> Unit, openTab: (AppTab) -> Unit) {
+fun HistoryList(container: AppContainer, selectedId: String?, selectedPearl: UUID?, player: AudioPlayback,
+                open: (HistoryRoute) -> Unit, openTab: (AppTab) -> Unit) {
     val library = container.library
-    val polishers = container.polishers
-    var showTopics by remember { mutableStateOf(false) }
+    // Read so the list is redrawn once the languages of everything have been worked out.
+    library.languageRevision
+    var mode by remember { mutableStateOf(HistoryMode.RECORDINGS) }
     var search by remember { mutableStateOf("") }
     var favoritesOnly by remember { mutableStateOf(false) }
     var pendingDelete by remember { mutableStateOf<RecordingEntry?>(null) }
+    var playingVideo by remember { mutableStateOf<PlayingVideo?>(null) }
+    var videoError by remember { mutableStateOf<String?>(null) }
     val shown = library.entries.filter { entry -> (!favoritesOnly || entry.meta.favorite) && (search.isEmpty() || matches(entry, search)) }
+    // Every pearl with a video (or one still to collect), newest first.
+    val videos = library.entries.flatMap { entry -> entry.videoPearls.map { entry to it } }
+        .filter { search.isEmpty() || matches(it.first, search) }
+        .sortedByDescending { it.second.created }
+
+    fun play(entry: RecordingEntry, pearl: Pearl) {
+        player.pause()
+        runCatching { PlayingVideo.of(library, entry, pearl) }.onSuccess { playingVideo = it }.onFailure { videoError = it.message }
+    }
 
     ScreenScaffold("History", actions = {
-        if (!showTopics) IconButton(onClick = { favoritesOnly = !favoritesOnly }) {
+        if (mode == HistoryMode.RECORDINGS) IconButton(onClick = { favoritesOnly = !favoritesOnly }) {
             Icon(if (favoritesOnly) Icons.Filled.Star else Icons.Filled.StarBorder, if (favoritesOnly) "Show all recordings" else "Show favorites only")
         }
     }) {
-        Segmented(listOf(false, true), showTopics, { if (it) "Topics" else "Recordings" }) { showTopics = it }
+        Segmented(HistoryMode.entries, mode, { it.label }) { mode = it }
         OutlinedTextField(search, { search = it }, Modifier.fillMaxWidth(), singleLine = true, leadingIcon = { Icon(Icons.Filled.Search, null) },
-                          placeholder = { Text(if (showTopics) "Search topics" else "Search your thoughts") })
-        if (library.entries.isEmpty()) {
-            EmptyState(Icons.Filled.History, "No recordings yet", "Every thought you refine is saved here: the original recording and each pearl you forge from it.")
-        } else if (showTopics) {
-            TopicsContent(container, search, open, openTab)
-        } else if (shown.isEmpty()) {
-            if (search.isNotEmpty()) EmptyState(Icons.Filled.Search, "No results", "Nothing matches “$search”.")
-            else EmptyState(Icons.Filled.Star, "No favorites yet", "Tap the star on a recording to make it a favorite.")
-        } else {
-            FormSection {
-                shown.forEachIndexed { index, entry ->
-                    if (index > 0) RowDivider()
-                    HistoryRow(entry, entry.id == selectedId, onClick = { open(HistoryRoute.Recording(entry.id)) },
-                               onFavorite = { container.scope.launch { library.setFavorite(!entry.meta.favorite, entry.id) } },
-                               onDelete = { pendingDelete = entry })
+                          placeholder = { Text(if (mode == HistoryMode.TOPICS) "Search topics" else "Search your thoughts, in any language") })
+        when {
+            library.entries.isEmpty() ->
+                EmptyState(Icons.Filled.History, "No recordings yet", "Every thought you refine is saved here: the original recording and each pearl you forge from it.")
+            mode == HistoryMode.TOPICS -> TopicsContent(container, search, open, openTab)
+            mode == HistoryMode.VIDEOS -> when {
+                videos.isEmpty() && search.isNotEmpty() -> EmptyState(Icons.Filled.Search, "No results", "Nothing matches “$search”.")
+                videos.isEmpty() -> EmptyState(Icons.Filled.Movie, "No videos yet",
+                                               "Open a pearl and choose Make video, or add one you made elsewhere. Every video shows up here.")
+                else -> FormSection {
+                    videos.forEachIndexed { index, (entry, pearl) ->
+                        if (index > 0) RowDivider()
+                        VideoRow(library, entry, pearl, isSelected = pearl.id == selectedPearl, play = { play(entry, pearl) },
+                                 onClick = { open(HistoryRoute.PearlPage(entry.id, pearl.id)) })
+                    }
+                }
+            }
+            shown.isEmpty() -> {
+                if (search.isNotEmpty()) EmptyState(Icons.Filled.Search, "No results", "Nothing matches “$search”.")
+                else EmptyState(Icons.Filled.Star, "No favorites yet", "Tap the star on a recording to make it a favorite.")
+            }
+            else -> {
+                if (search.isEmpty() && !favoritesOnly) EnglishCatchUp(container, openTab)
+                FormSection {
+                    shown.forEachIndexed { index, entry ->
+                        if (index > 0) RowDivider()
+                        HistoryRow(library, entry, entry.id == selectedId, onClick = { open(HistoryRoute.Recording(entry.id)) },
+                                   onFavorite = { container.scope.launch { library.setFavorite(!entry.meta.favorite, entry.id) } },
+                                   onDelete = { pendingDelete = entry })
+                    }
                 }
             }
         }
     }
 
+    playingVideo?.let { VideoPlayerDialog(it) { playingVideo = null } }
+    videoError?.let { message ->
+        AlertDialog(
+            onDismissRequest = { videoError = null },
+            title = { Text("Couldn't play the video") },
+            text = { Text(message) },
+            confirmButton = { TextButton(onClick = { videoError = null }) { Text("OK") } },
+        )
+    }
     pendingDelete?.let { entry ->
         AlertDialog(
             onDismissRequest = { pendingDelete = null },
@@ -126,27 +197,112 @@ fun HistoryList(container: AppContainer, selectedId: String?, open: (HistoryRout
 }
 
 private fun matches(entry: RecordingEntry, query: String): Boolean =
-    (listOf(entry.meta.title, entry.transcript, entry.meta.gist ?: "") + entry.meta.categories.orEmpty() + entry.pearlTexts.values)
+    (listOf(entry.meta.title, entry.displayTitle, entry.transcript, entry.meta.gist ?: "") + entry.meta.categories.orEmpty() +
+        entry.pearlTexts.values + entry.meta.pearls.mapNotNull { it.english } + entry.otherLanguages)
         .any { it.contains(query, ignoreCase = true) }
 
-/** A recording in the list: its title, when it was made, how many pearls, and its topics. */
+/** Offers English versions for pearls in other languages made before Pearl Forge wrote them automatically. */
 @Composable
-private fun HistoryRow(entry: RecordingEntry, isSelected: Boolean, onClick: () -> Unit, onFavorite: () -> Unit, onDelete: () -> Unit) {
+private fun EnglishCatchUp(container: AppContainer, openTab: (AppTab) -> Unit) {
+    val library = container.library
+    val polishers = container.polishers
+    val missing = library.pearlsMissingEnglish.size
+    if (missing == 0) return
+    val choice = polishers.activeChoice
+    val error = library.translationErrors.values.firstOrNull()
+    FormSection(footer = when {
+        error != null -> ({ FooterText(error, isError = true) })
+        choice != null -> ({ FooterText("So you can tell what pearls in other languages say. New ones get theirs automatically. Uses ${polishers.label(choice)}, about a cent a pearl.") })
+        else -> null
+    }) {
+        when {
+            library.translating.isNotEmpty() -> ProgressRow("Writing English versions…")
+            choice != null -> TextButton(onClick = { container.scope.launch { library.addEnglishToAll(choice) } }) {
+                Icon(Icons.Filled.Translate, null); Spacer(Modifier.width(8.dp))
+                Text(if (missing == 1) "Add English to 1 pearl in another language" else "Add English to $missing pearls in other languages")
+            }
+            else -> TextButton(onClick = { openTab(AppTab.AI) }) { Text("Choose an AI in the AI tab to see pearls in English") }
+        }
+    }
+}
+
+/**
+ * A recording in the list: a still from its newest video (or what kind of recording it is), its
+ * title in your language, when it was made, how many pearls, and badges for its videos and the
+ * languages its pearls are in.
+ */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun HistoryRow(library: RecordingLibrary, entry: RecordingEntry, isSelected: Boolean, onClick: () -> Unit, onFavorite: () -> Unit, onDelete: () -> Unit) {
     var pearls = if (entry.meta.pearls.size == 1) "1 pearl" else "${entry.meta.pearls.size} pearls"
     entry.meta.lecture?.let { pearls = "Lecture · about ${it.minutes} min" } ?: run { if (entry.meta.isTyped) pearls = "Typed · $pearls" }
     val topics = entry.meta.categories.orEmpty()
+    val made = entry.videoPearls.count { it.videoFile != null }
+    val waiting = entry.videoPearls.count { it.videoGenerationId != null }
+    val languages = entry.otherLanguages
     Row(Modifier.fillMaxWidth().clickable(onClick = onClick).padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-        Column(Modifier.weight(1f)) {
-            Text(entry.meta.title.ifEmpty { "Untitled thought" }, style = MaterialTheme.typography.titleSmall, maxLines = 2, overflow = TextOverflow.Ellipsis,
+        val video = entry.videoPearls.firstOrNull { it.videoFile != null } ?: entry.videoPearls.firstOrNull()
+        if (video != null) VideoStill(library, entry.id, video, 50.dp, 50.dp)
+        else Box(Modifier.size(50.dp).clip(RoundedCornerShape(8.dp)).background(MaterialTheme.colorScheme.surfaceVariant), contentAlignment = Alignment.Center) {
+            Icon(when {
+                entry.meta.lecture != null -> Icons.Filled.School
+                entry.meta.isTyped -> Icons.Filled.Keyboard
+                else -> Icons.Filled.GraphicEq
+            }, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        Spacer(Modifier.width(12.dp))
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            Text(entry.displayTitle, style = MaterialTheme.typography.titleSmall, maxLines = 2, overflow = TextOverflow.Ellipsis,
                  color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface)
             Text(entry.meta.created.mediumDateTime() + " · " + pearls + if (topics.isEmpty()) "" else " · " + topics.joinToString(", "),
                  style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 2)
+            if (made + waiting > 0 || languages.isNotEmpty()) {
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(4.dp), modifier = Modifier.padding(top = 2.dp)) {
+                    if (made > 0) Badge(if (made == 1) "Video" else "$made videos", Icons.Filled.Movie, BadgeColors.video)
+                    if (waiting > 0) Badge(if (waiting == 1) "Video to collect" else "$waiting videos to collect", Icons.Filled.Download, BadgeColors.waiting)
+                    languages.forEach { Badge(it, Icons.Filled.Language, BadgeColors.language) }
+                }
+            }
         }
         IconButton(onClick = onFavorite) {
             Icon(if (entry.meta.favorite) Icons.Filled.Star else Icons.Filled.StarBorder, if (entry.meta.favorite) "Unfavorite" else "Favorite",
                  tint = if (entry.meta.favorite) Color(0xFFF9A825) else MaterialTheme.colorScheme.onSurfaceVariant)
         }
         IconButton(onClick = onDelete) { Icon(Icons.Filled.Delete, "Delete", tint = MaterialTheme.colorScheme.onSurfaceVariant) }
+    }
+}
+
+/** A video in the Videos list: its still (tap to play), the recording's title, the pearl and language, what it says in English, and what it cost. */
+@Composable
+private fun VideoRow(library: RecordingLibrary, entry: RecordingEntry, pearl: Pearl, isSelected: Boolean, play: () -> Unit, onClick: () -> Unit) {
+    val language = entry.otherLanguage(pearl)
+    // "Pearl 2 · Korean · Kling Avatar v2 Standard · $1.05 · Nov 6, 2026"
+    val detail = buildList {
+        add("Pearl ${pearl.number}")
+        language?.let(::add)
+        val endpoint = pearl.videoModel
+        if (endpoint != null) {
+            add(VideoModel.nameOfEndpoint(endpoint))
+            pearl.videoCost?.let { add(it.dollars) }
+        } else if (pearl.videoCredits != null) add("ElevenLabs")
+        add(pearl.created.mediumDate())
+    }.joinToString(" · ")
+    Row(Modifier.fillMaxWidth().clickable(onClick = onClick).padding(vertical = 8.dp), verticalAlignment = Alignment.Top) {
+        Box(Modifier.clip(RoundedCornerShape(8.dp)).clickable(enabled = pearl.videoFile != null, onClickLabel = "Play video", onClick = play)) {
+            VideoStill(library, entry.id, pearl, 66.dp, 88.dp)
+        }
+        Spacer(Modifier.width(12.dp))
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+            Text(entry.displayTitle, style = MaterialTheme.typography.titleSmall, maxLines = 2, overflow = TextOverflow.Ellipsis,
+                 color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface)
+            Text(detail, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            val words = entry.readableText(pearl)
+            if (words != null) Text(words, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 2, overflow = TextOverflow.Ellipsis)
+            else if (language != null) Text("In $language. Open it to see it in English.", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            if (library.videoWork[pearl.id] != null) Badge("Being made", Icons.Filled.HourglassEmpty, BadgeColors.waiting)
+            else if (pearl.videoGenerationId != null) Badge("Not collected yet: open to collect", Icons.Filled.Download, BadgeColors.waiting)
+        }
+        Icon(Icons.Filled.ChevronRight, null, Modifier.align(Alignment.CenterVertically), tint = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }
 
@@ -190,6 +346,7 @@ fun RecordingDetail(container: AppContainer, entryId: String, player: AudioPlayb
     val settings = container.settings
     val context = LocalContext.current
     val entry = library.entry(entryId)
+    library.languageRevision
     var showingForge by remember { mutableStateOf(false) }
     var editingTopics by remember { mutableStateOf(false) }
     var showingTranscript by remember { mutableStateOf(false) }
@@ -208,7 +365,7 @@ fun RecordingDetail(container: AppContainer, entryId: String, player: AudioPlayb
     }) {
         FormSection {
             Column(Modifier.padding(vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                Text(entry.meta.title.ifEmpty { "Untitled thought" }, style = MaterialTheme.typography.titleMedium)
+                Text(entry.displayTitle, style = MaterialTheme.typography.titleMedium)
                 Text(entry.meta.created.fullDateTime(), color = MaterialTheme.colorScheme.onSurfaceVariant)
                 if (lecture != null) Row(verticalAlignment = Alignment.CenterVertically) {
                     Icon(Icons.Filled.School, null, Modifier.size(16.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -251,7 +408,7 @@ fun RecordingDetail(container: AppContainer, entryId: String, player: AudioPlayb
             library.forging[entry.id]?.let { ProgressRow(it.progressLabel) }
             entry.pearlsNewestFirst.forEachIndexed { index, pearl ->
                 if (index > 0) RowDivider()
-                PearlRow(pearl, entry.pearlTexts[pearl.id] ?: "", polishers) { open(HistoryRoute.PearlPage(entry.id, pearl.id)) }
+                PearlRow(library, entry, pearl, polishers) { open(HistoryRoute.PearlPage(entry.id, pearl.id)) }
             }
             if (lecture == null) {
                 TextButton(onClick = { showingForge = true },
@@ -345,23 +502,55 @@ fun polishedBy(pearl: Pearl, polishers: PolishersModel): String? {
     return "${provider.displayName} · ${polishers.modelName(model, provider)}"
 }
 
-/** A pearl in the list: its number, mode and AI, your request, and how it starts. */
+/**
+ * A pearl in the list: a still from its video if it has one, its number, mode and language, its AI,
+ * your request, and how it starts (in English when it's in another language, with the original underneath).
+ */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun PearlRow(pearl: Pearl, text: String, polishers: PolishersModel, onClick: () -> Unit) {
-    Row(Modifier.fillMaxWidth().clickable(onClick = onClick).padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+private fun PearlRow(library: RecordingLibrary, entry: RecordingEntry, pearl: Pearl, polishers: PolishersModel, onClick: () -> Unit) {
+    val text = entry.pearlTexts[pearl.id] ?: ""
+    val language = entry.otherLanguage(pearl)
+    val english = pearl.english
+    Row(Modifier.fillMaxWidth().clickable(onClick = onClick).padding(vertical = 8.dp), verticalAlignment = Alignment.Top) {
+        if (pearl.videoFile != null || pearl.videoGenerationId != null) {
+            VideoStill(library, entry.id, pearl, 48.dp, 64.dp)
+            Spacer(Modifier.width(12.dp))
+        }
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
             Text("Pearl ${pearl.number} · ${pearl.mode.title}", style = MaterialTheme.typography.titleSmall)
             polishedBy(pearl, polishers)?.let { Text(it, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
-            pearl.notes?.takeIf { it.isNotEmpty() }?.let {
+            pearl.notes?.takeIf { it.isNotEmpty() && !isLanguageRequest(it) }?.let {
                 Text("“$it”", style = MaterialTheme.typography.bodySmall.copy(fontStyle = FontStyle.Italic), color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 2)
             }
-            Text(text, style = MaterialTheme.typography.bodyMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
+            if (language != null && english != null) {
+                Text(english, style = MaterialTheme.typography.bodyMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                Text(text, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            } else {
+                Text(text, style = MaterialTheme.typography.bodyMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                if (library.translating[pearl.id] == true) {
+                    Text("Writing it in English…", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
+            if (language != null || pearl.videoFile != null || pearl.videoGenerationId != null || library.videoWork[pearl.id] != null) {
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(4.dp), modifier = Modifier.padding(top = 2.dp)) {
+                    language?.let { Badge(it, Icons.Filled.Language, BadgeColors.language) }
+                    when {
+                        library.videoWork[pearl.id] != null -> Badge("Making video", Icons.Filled.HourglassEmpty, BadgeColors.waiting)
+                        pearl.videoGenerationId != null -> Badge("Video to collect", Icons.Filled.Download, BadgeColors.waiting)
+                        pearl.videoFile != null -> Badge("Video", Icons.Filled.Movie, BadgeColors.video)
+                    }
+                }
+            }
             Text(pearl.created.mediumDateTime() + if (pearl.audioFile == null) " · no audio yet" else "",
                  style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
-        Icon(Icons.Filled.ChevronRight, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+        Icon(Icons.Filled.ChevronRight, null, Modifier.align(Alignment.CenterVertically), tint = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }
+
+/** The request Pearl Forge adds for "Speak in"; the language badge says it. */
+private fun isLanguageRequest(notes: String) = SpeechLanguages.all.any { SpeechLanguages.request(it) == notes }
 
 /** A button that loads a saved audio file into the shared player and plays it. */
 @Composable
@@ -382,13 +571,21 @@ fun AudioItemRow(title: String, key: String, player: AudioPlayback, file: () -> 
     }
 }
 
-/** One pearl: listen to it, share it, edit its text and regenerate the audio, or delete it. */
+/** One pearl: listen to it, share it, turn it into a video of your avatar, edit its text and regenerate the audio, or delete it. */
 @Composable
 fun PearlPage(container: AppContainer, entryId: String, pearlId: UUID, player: AudioPlayback, onBack: () -> Unit) {
     val library = container.library
+    val settings = container.settings
+    val polishers = container.polishers
     val context = LocalContext.current
     val entry = library.entry(entryId)
     val pearl = entry?.pearl(pearlId)
+    library.languageRevision
+    LaunchedEffect(Unit) {
+        if (settings.videoModel.isFal) {
+            if (settings.falStatus == KeyStatus.Saved) settings.checkFalKey()
+        } else if (settings.credits == null) settings.refreshCredits()
+    }
     if (entry == null || pearl == null) {
         ScreenScaffold("Pearl", onBack) { EmptyState(Icons.Filled.Delete, "This pearl was deleted", "") }
         return
@@ -396,20 +593,25 @@ fun PearlPage(container: AppContainer, entryId: String, pearlId: UUID, player: A
     val savedText = entry.pearlTexts[pearlId] ?: ""
     var text by remember(pearlId) { mutableStateOf(savedText) }
     var confirmingDelete by remember { mutableStateOf(false) }
+    var playingVideo by remember { mutableStateOf<PlayingVideo?>(null) }
     val isBusy = library.forging[entryId] != null
     val isEdited = text.trim() != savedText.trim()
+    val language = entry.otherLanguage(pearl)
 
     fun respeak(newText: String) = container.scope.launch {
-        library.respeak(pearlId, entryId, newText, container.settings.selectedVoiceId)?.let { audio ->
+        library.respeak(pearlId, entryId, newText, settings.selectedVoiceId)?.let { audio ->
             text = newText.trim()
             player.load(audio, pearlId.toString())
             player.play()
+            // Edited text loses its English version; write a fresh one.
+            polishers.activeChoice?.let { library.addEnglishIfMissing(pearlId, entryId, it) }
         }
     }
 
     ScreenScaffold("Pearl ${pearl.number}", onBack) {
         FormSection {
             LabeledRow("Mode", pearl.mode.title)
+            language?.let { RowDivider(); LabeledRow("Language", it) }
             pearl.notes?.takeIf { it.isNotEmpty() }?.let {
                 RowDivider()
                 Column(Modifier.padding(vertical = 8.dp)) {
@@ -419,7 +621,7 @@ fun PearlPage(container: AppContainer, entryId: String, pearlId: UUID, player: A
             }
             RowDivider()
             LabeledRow("Forged", pearl.created.mediumDateTime())
-            polishedBy(pearl, container.polishers)?.let { RowDivider(); LabeledRow("Polished by", it) }
+            polishedBy(pearl, polishers)?.let { RowDivider(); LabeledRow("Polished by", it) }
         }
 
         FormSection("In your voice", footer = library.forgeErrors[entryId]?.let { error -> { FooterText(error, isError = true) } }) {
@@ -439,7 +641,15 @@ fun PearlPage(container: AppContainer, entryId: String, pearlId: UUID, player: A
             }
         }
 
-        FormSection("Refined text", footer = { FooterText("If anything's off, fix it here, then regenerate the audio.") }) {
+        VideoSection(container, entry, pearl, isBusy) {
+            player.pause()
+            runCatching { PlayingVideo.of(library, entry, pearl) }.onSuccess { playingVideo = it }
+                .onFailure { library.videoErrors[pearlId] = "Couldn't open the video: ${it.message}" }
+        }
+
+        if (language != null) EnglishSection(container, entryId, pearl, language, isEdited)
+
+        FormSection(language?.let { "Refined text · $it" } ?: "Refined text", footer = { FooterText("If anything's off, fix it here, then regenerate the audio.") }) {
             OutlinedTextField(text, { text = it }, Modifier.fillMaxWidth().heightIn(min = 200.dp).padding(vertical = 8.dp), enabled = !isBusy)
             if (isEdited) {
                 TextButton(onClick = { respeak(text) }, enabled = !isBusy) { Text("Save edits & regenerate audio") }
@@ -454,6 +664,7 @@ fun PearlPage(container: AppContainer, entryId: String, pearlId: UUID, player: A
         }
     }
 
+    playingVideo?.let { VideoPlayerDialog(it) { playingVideo = null } }
     if (confirmingDelete) {
         AlertDialog(
             onDismissRequest = { confirmingDelete = false },
@@ -471,6 +682,192 @@ fun PearlPage(container: AppContainer, entryId: String, pearlId: UUID, player: A
         )
     }
 }
+
+/** What a pearl in another language says, in English. */
+@Composable
+private fun EnglishSection(container: AppContainer, entryId: String, pearl: Pearl, language: String, isEdited: Boolean) {
+    val library = container.library
+    val polishers = container.polishers
+    val choice = polishers.activeChoice
+    val english = pearl.english
+    FormSection("In English", footer = {
+        val error = library.translationErrors[pearl.id]
+        when {
+            error != null -> FooterText(error, isError = true)
+            english != null -> FooterText("What this pearl says in $language, translated back so you can follow it. Your pearl itself isn't changed.")
+            choice != null -> FooterText("${polishers.label(choice)} translates this $language pearl back into English so you know what it says. It's saved with the pearl; a short pearl costs about a cent.")
+        }
+    }) {
+        when {
+            library.translating[pearl.id] == true -> ProgressRow("Writing it in English…")
+            english != null -> SelectionContainer { Text(english, modifier = Modifier.padding(vertical = 10.dp)) }
+            choice != null -> TextButton(onClick = { container.scope.launch { library.addEnglish(pearl.id, entryId, choice) } }, enabled = !isEdited) {
+                Icon(Icons.Filled.Translate, null); Spacer(Modifier.width(8.dp)); Text("Show it in English")
+            }
+            else -> Text("Choose an AI in the AI tab to see this pearl in English.", color = MaterialTheme.colorScheme.onSurfaceVariant,
+                         modifier = Modifier.padding(vertical = 10.dp))
+        }
+    }
+}
+
+/** The pearl as a video: play or share it, make one of your avatar speaking it, collect one still being made, or add one you made elsewhere. */
+@Composable
+private fun VideoSection(container: AppContainer, entry: RecordingEntry, pearl: Pearl, isBusy: Boolean, play: () -> Unit) {
+    val library = container.library
+    val settings = container.settings
+    val context = LocalContext.current
+    val working = library.videoWork[pearl.id]
+    val model = settings.videoModel
+    val planAllows = if (model.isFal) settings.falStatus != KeyStatus.NotSet else AvatarVideo.planAllowsApp(settings.credits?.tier) != false
+    var actionError by remember { mutableStateOf<String?>(null) }
+    var quote by remember { mutableStateOf<String?>(null) }
+    var quotedModel by remember { mutableStateOf<VideoModel?>(null) }
+
+    fun add(uri: Uri) = container.scope.launch {
+        runCatching { library.addVideo(uri, pearl.id, entry.id) }
+            .onSuccess { actionError = null }
+            .onFailure { actionError = "Couldn't add that video: ${it.message}" }
+    }
+    val photos = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri -> uri?.let(::add) }
+    val files = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri -> uri?.let(::add) }
+
+    /** Works out what a video of this pearl should cost, then asks. */
+    fun quoteVideo() = container.scope.launch {
+        actionError = null
+        val audio = pearl.audioFile?.let { library.audioFile(it, entry.id) }
+        val seconds = audio?.let { withContext(Dispatchers.IO) { AvatarVideo.seconds(it) } }
+        if (seconds == null) {
+            actionError = "This pearl's audio couldn't be loaded."
+            return@launch
+        }
+        val length = timeString(seconds)
+        val chosen = settings.videoModel
+        val lines = mutableListOf<String>()
+        if (chosen.isFal) {
+            settings.refreshFalBalance()
+            val longest = chosen.maxSeconds
+            if (longest != null && seconds > longest) {
+                actionError = "${chosen.name} takes pearls up to ${timeString(longest)}, and this one runs $length. Choose another model in Settings › Video avatar."
+                return@launch
+            }
+            val cost = chosen.cost(seconds)
+            val rate = chosen.dollarsPerSecond
+            if (cost != null && rate != null) {
+                lines.add("This pearl runs $length. With ${chosen.name} it should cost about ${cost.dollars} (fal.ai charges ${perSecond(rate)} a second).")
+            }
+            settings.falBalance?.let { lines.add("Your fal.ai balance is ${it.dollars}.") }
+        } else {
+            val rate = AvatarVideo.creditsPerSecond(library.entries.flatMap { it.meta.pearls })
+            if (rate != null) {
+                val credits = (rate * seconds).roundToInt()
+                var line = "This pearl runs $length. Judging by your last videos, it should use about ${"%,d".format(credits)} credits"
+                settings.credits?.dollarsPerThousand?.let { line += " (about ${(credits / 1000.0 * it).dollars} of your plan)" }
+                lines.add("$line.")
+            } else {
+                lines.add("This pearl runs $length. ElevenLabs doesn't publish what these videos cost, so Pearl Forge will measure this one and estimate the next ones from it. A short pearl is a good first try.")
+            }
+            settings.credits?.let { lines.add("You have ${"%,d".format(it.remaining)} credits left this month.") }
+        }
+        lines.add("It takes a few minutes. Keep Pearl Forge open; if you leave, come back to this pearl to collect the video.")
+        quotedModel = chosen
+        quote = lines.joinToString("\n\n")
+    }
+
+    FormSection("As a video", footer = {
+        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            (library.videoErrors[pearl.id] ?: actionError)?.let { FooterText(it, isError = true) }
+            if (working == null && pearl.videoFile == null) {
+                FooterText(when {
+                    settings.avatarPicture == null ->
+                        "To make videos here, choose a picture of your avatar in Settings › Video avatar. Or make the video in ElevenLabs Avatars (Share audio sends it this pearl's speech), save it, and add it here."
+                    !planAllows && model.isFal -> "To make videos with ${model.name}, add your fal.ai key in Settings › API keys."
+                    !planAllows -> AvatarVideo.NEEDS_PRO_MESSAGE + " Or choose a fal.ai model in Settings › Video avatar. Share audio sends ElevenLabs this pearl's speech."
+                    else -> "Make video sends your avatar picture and this pearl's audio to ${if (model.isFal) "fal.ai (${model.name})" else "ElevenLabs"}, which makes a video of your avatar speaking it. You'll see what it should cost first. To use a different model, go to Settings › Video avatar."
+                })
+            }
+            if (pearl.videoGenerationId == null) {
+                val credits = pearl.videoCredits
+                val endpoint = pearl.videoModel
+                val cost = pearl.videoCost
+                if (credits != null) FooterText("Making this video used ${"%,d".format(credits)} ElevenLabs credits.")
+                else if (endpoint != null && cost != null) FooterText("Made by ${VideoModel.nameOfEndpoint(endpoint)} on fal.ai for about ${cost.dollars}.")
+            }
+        }
+    }) {
+        if (working != null) {
+            ProgressRow(working)
+        } else {
+            if (pearl.videoFile != null) {
+                Row(Modifier.fillMaxWidth().clickable(onClick = play).padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                    VideoStill(library, entry.id, pearl, 72.dp, 96.dp)
+                    Spacer(Modifier.width(14.dp))
+                    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                        Text("Play video")
+                        pearl.videoSeconds?.let { Text(timeString(it), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+                        entry.otherLanguage(pearl)?.let { language ->
+                            Text(if (pearl.english == null) "Shows the $language text as you watch" else "Shows what you're saying in English as you watch",
+                                 style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                    }
+                }
+                TextButton(onClick = {
+                    container.scope.launch {
+                        runCatching { library.videoShareCopy(pearl.id, entry.id) }
+                            .onSuccess { shareFile(context, it, videoMimeType(it)) }
+                            .onFailure { actionError = "Couldn't prepare the video: ${it.message}" }
+                    }
+                }) { Icon(Icons.Filled.Share, null); Spacer(Modifier.width(8.dp)); Text("Share video") }
+            }
+            if (pearl.videoGenerationId != null) {
+                TextButton(onClick = { container.scope.launch { library.collectVideo(pearl.id, entry.id) } }) {
+                    Icon(Icons.Filled.Download, null); Spacer(Modifier.width(8.dp))
+                    Text("Collect your video from ${if (pearl.videoModel == null) "ElevenLabs" else "fal.ai"}")
+                }
+            } else if (pearl.audioFile != null) {
+                TextButton(onClick = { quoteVideo() }, enabled = !isBusy && settings.avatarPicture != null && planAllows) {
+                    Icon(Icons.Filled.RecentActors, null); Spacer(Modifier.width(8.dp))
+                    Text(if (pearl.videoFile == null) "Make video" else "Make a new video")
+                }
+            }
+            TextButton(onClick = { photos.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.VideoOnly)) }) {
+                Icon(Icons.Filled.PhotoLibrary, null); Spacer(Modifier.width(8.dp))
+                Text(if (pearl.videoFile == null) "Add video from Photos" else "Replace with a video from Photos")
+            }
+            TextButton(onClick = { files.launch(arrayOf("video/*")) }) {
+                Icon(Icons.Filled.Folder, null); Spacer(Modifier.width(8.dp))
+                Text(if (pearl.videoFile == null) "Add video from Files" else "Replace with a video from Files")
+            }
+            if (pearl.videoFile != null) {
+                TextButton(onClick = {
+                    container.scope.launch { runCatching { library.removeVideo(pearl.id, entry.id) }.onFailure { actionError = it.message } }
+                }) { Text("Remove video", color = MaterialTheme.colorScheme.error) }
+            }
+        }
+    }
+
+    quote?.let { message ->
+        AlertDialog(
+            onDismissRequest = { quote = null },
+            title = { Text("Make a video of pearl ${pearl.number}?") },
+            text = { Text(message) },
+            confirmButton = {
+                TextButton(onClick = {
+                    quote = null
+                    val picture = settings.avatarPicture
+                    val chosen = quotedModel
+                    if (picture != null && chosen != null) container.scope.launch { library.makeVideo(pearl.id, entry.id, picture, chosen) }
+                }) { Text("Make video") }
+            },
+            dismissButton = { TextButton(onClick = { quote = null }) { Text("Cancel") } },
+        )
+    }
+}
+
+/** "$0.0562", "$0.14": fal.ai's price per second, to as many places as it has. */
+private fun perSecond(rate: Double): String = NumberFormat.getCurrencyInstance(Locale.US).apply {
+    minimumFractionDigits = 2
+    maximumFractionDigits = 4
+}.format(rate)
 
 /** Choose how to forge another pearl: the mode, which AI polishes it, the language, and anything you want different this time. */
 @OptIn(ExperimentalMaterial3Api::class)
@@ -580,7 +977,7 @@ class TopicQueue(val player: AudioPlayback) {
 
     fun start(entries: List<RecordingEntry>, library: com.solidplisskin.pearlforge.recordings.RecordingLibrary) {
         items = entries.mapNotNull { entry ->
-            entry.latestSpokenPearl?.audioFile?.let { Item(entry.id, entry.meta.title.ifEmpty { "Untitled thought" }, library.audioFile(it, entry.id)) }
+            entry.latestSpokenPearl?.audioFile?.let { Item(entry.id, entry.displayTitle, library.audioFile(it, entry.id)) }
         }
         index = 0
         playCurrent()
@@ -650,7 +1047,7 @@ fun TopicPage(container: AppContainer, topic: String, onBack: () -> Unit, open: 
             entries.forEachIndexed { index, entry ->
                 if (index > 0) RowDivider()
                 Column(Modifier.fillMaxWidth().clickable { open(HistoryRoute.Recording(entry.id)) }.padding(vertical = 8.dp)) {
-                    Text(entry.meta.title.ifEmpty { "Untitled thought" }, style = MaterialTheme.typography.titleSmall, maxLines = 2)
+                    Text(entry.displayTitle, style = MaterialTheme.typography.titleSmall, maxLines = 2)
                     entry.meta.gist?.takeIf { it.isNotEmpty() }?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 3) }
                     Text(entry.meta.created.mediumDateTime(), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
@@ -661,7 +1058,7 @@ fun TopicPage(container: AppContainer, topic: String, onBack: () -> Unit, open: 
             FormSection("Reading") {
                 references.forEachIndexed { index, (reference, entry) ->
                     if (index > 0) RowDivider()
-                    ReferenceRow(reference, entry.meta.title) { openUrl(context, reference.url) }
+                    ReferenceRow(reference, entry.displayTitle) { openUrl(context, reference.url) }
                 }
             }
         }

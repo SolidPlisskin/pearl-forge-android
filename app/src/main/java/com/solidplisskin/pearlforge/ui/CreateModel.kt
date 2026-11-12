@@ -157,15 +157,41 @@ class CreateModel(private val context: Context, private val library: RecordingLi
             } ?: "m4a"
             val copy = File(context.cacheDir, "imported-recording.$extension")
             context.contentResolver.openInputStream(uri)!!.use { input -> copy.outputStream().use { input.copyTo(it) } }
-            source = copy
-            sourceDuration = runCatching {
-                MediaMetadataRetriever().run {
-                    setDataSource(copy.absolutePath)
-                    extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toDouble()?.div(1000).also { release() }
-                }
-            }.getOrNull()
+            useImported(copy)
         } catch (error: Exception) {
             errorMessage = "Couldn't open that file: ${error.message}"
+        }
+    }
+
+    private fun useImported(copy: File) {
+        source = copy
+        sourceDuration = runCatching {
+            MediaMetadataRetriever().run {
+                setDataSource(copy.absolutePath)
+                extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toDouble()?.div(1000).also { release() }
+            }
+        }.getOrNull()
+    }
+
+    /** A voice note that hasn't been refined yet (or one still being recorded), which bringing in another recording would replace. */
+    val hasUnrefinedRecording: Boolean get() = !hasResult && (source != null || recorder.isRecording)
+
+    /**
+     * Uses audio another app shared with Pearl Forge (Share › Pearl Forge, for example a Plaud
+     * recording). Importing makes its own copy, so the one it was handed goes.
+     */
+    fun importSharedRecording(file: File) {
+        if (recorder.isRecording) recorder.stop()
+        input = Input.RECORD
+        startNew()
+        try {
+            val copy = File(context.cacheDir, "imported-recording.${file.extension.ifEmpty { "m4a" }}")
+            file.copyTo(copy, overwrite = true)
+            useImported(copy)
+        } catch (error: Exception) {
+            errorMessage = "Couldn't open that file: ${error.message}"
+        } finally {
+            file.delete()
         }
     }
 
@@ -232,8 +258,10 @@ class CreateModel(private val context: Context, private val library: RecordingLi
                 val (entry, pearl) = library.createRecording(if (input == Input.RECORD) source else null, said, refinement, chosenMode, notes, voiceId)
                 recordingId = entry.id
                 pearlId = pearl.id
-                // Sort recordings into topics in the background; it doesn't hold anything up.
+                // Sort recordings into topics, and write an English version of a pearl in another language, in the
+                // background; neither holds anything up.
                 if (input == Input.RECORD && polisher != null) scope.launch { library.sortIntoTopics(entry.id, polisher) }
+                if (refinement != null && polisher != null) scope.launch { library.addEnglishIfMissing(pearl.id, entry.id, polisher) }
                 refinedText = refinement?.text ?: said
                 refinedMode = chosenMode
             }

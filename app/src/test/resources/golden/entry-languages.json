@@ -1,0 +1,163 @@
+[
+  {
+    "expected" : {
+      "display_title" : "I think there's a decent chance I procrastinate",
+      "other_languages" : [
+
+      ],
+      "pearls_missing_english" : [
+
+      ],
+      "video_pearls" : [
+
+      ]
+    },
+    "name" : "english",
+    "pearls" : [
+      {
+        "id" : "10000000-0000-4000-8000-000000000001",
+        "readable_text" : "I think there's a decent chance I procrastinate because starting feels bad.",
+        "text" : "I think there's a decent chance I procrastinate because starting feels bad."
+      }
+    ],
+    "title" : "I think there's a decent chance I procrastinate",
+    "transcript" : "Um, I think there's a decent chance I procrastinate."
+  },
+  {
+    "expected" : {
+      "display_title" : "Alas, eleventy-one years amongst such excellent and admirable hobbits.",
+      "other_languages" : [
+        "French",
+        "Korean"
+      ],
+      "pearls_missing_english" : [
+        "10000000-0000-4000-8000-000000000002"
+      ],
+      "video_pearls" : [
+        "10000000-0000-4000-8000-000000000002",
+        "10000000-0000-4000-8000-000000000001"
+      ]
+    },
+    "name" : "french-first-pearl",
+    "pearls" : [
+      {
+        "english" : "Alas, a hundred and eleven years among such fine hobbits!",
+        "id" : "10000000-0000-4000-8000-000000000001",
+        "other_language" : "French",
+        "readable_text" : "Alas, a hundred and eleven years among such fine hobbits!",
+        "text" : "Hélas, onzante-et-un ans parmi des hobbits si excellents et si admirables !",
+        "video_file" : "pearl-01-clean.mp4"
+      },
+      {
+        "id" : "10000000-0000-4000-8000-000000000002",
+        "other_language" : "Korean",
+        "text" : "아아, 이렇게 훌륭하고 존경할 만한 호빗 여러분과 함께 백열한 해를 보냈군요.",
+        "video_generation_id" : "gen-1"
+      }
+    ],
+    "title" : "Hélas, onzante-et-un ans parmi des hobbits si excellents",
+    "transcript" : "Alas, eleventy-one years amongst such excellent and admirable hobbits.\nSecond line."
+  },
+  {
+    "expected" : {
+      "display_title" : "Could I have a croissant?",
+      "other_languages" : [
+        "French",
+        "Italian"
+      ],
+      "pearls_missing_english" : [
+        "10000000-0000-4000-8000-000000000002"
+      ],
+      "video_pearls" : [
+        "10000000-0000-4000-8000-000000000002"
+      ]
+    },
+    "name" : "typed-in-french",
+    "pearls" : [
+      {
+        "english" : "Could I have a croissant?",
+        "id" : "10000000-0000-4000-8000-000000000001",
+        "other_language" : "French",
+        "readable_text" : "Could I have a croissant?",
+        "text" : "Est-ce que je pourrais avoir un croissant ?"
+      },
+      {
+        "id" : "10000000-0000-4000-8000-000000000002",
+        "other_language" : "Italian",
+        "text" : "Penso che ci sia una buona probabilità che io rimandi le cose perché iniziare mi fa sentire male.",
+        "video_file" : "pearl-02.mp4"
+      }
+    ],
+    "title" : "Est-ce que je pourrais avoir un croissant ?",
+    "transcript" : "Est-ce que je pourrais avoir un croissant ?"
+  },
+  {
+    "expected" : {
+      "display_title" : "Je pense que je remets les choses à plus tard",
+      "other_languages" : [
+        "French"
+      ],
+      "pearls_missing_english" : [
+        "10000000-0000-4000-8000-000000000001"
+      ],
+      "video_pearls" : [
+
+      ]
+    },
+    "name" : "foreign-no-english",
+    "pearls" : [
+      {
+        "id" : "10000000-0000-4000-8000-000000000001",
+        "other_language" : "French",
+        "text" : "Je pense que je remets les choses à plus tard parce que commencer me fait me sentir mal."
+      }
+    ],
+    "title" : "Je pense que je remets les choses à plus tard",
+    "transcript" : "Je pense que je remets les choses à plus tard parce que commencer me fait me sentir mal."
+  },
+  {
+    "expected" : {
+      "display_title" : "the history of the croissant",
+      "other_languages" : [
+        "French"
+      ],
+      "pearls_missing_english" : [
+
+      ],
+      "video_pearls" : [
+
+      ]
+    },
+    "lecture_topic" : "the history of the croissant",
+    "name" : "lecture",
+    "pearls" : [
+      {
+        "id" : "10000000-0000-4000-8000-000000000001",
+        "other_language" : "French",
+        "text" : "Le croissant est né à Vienne, dit-on, bien avant d'arriver à Paris. Mais l'histoire est plus compliquée que cela."
+      }
+    ],
+    "title" : "L'histoire du croissant, de Vienne à Paris",
+    "transcript" : "Fais-moi une conférence sur l'histoire du croissant."
+  },
+  {
+    "expected" : {
+      "display_title" : "Untitled thought",
+      "other_languages" : [
+
+      ],
+      "pearls_missing_english" : [
+
+      ],
+      "video_pearls" : [
+
+      ]
+    },
+    "name" : "empty-title",
+    "pearls" : [
+
+    ],
+    "title" : "",
+    "transcript" : ""
+  }
+]

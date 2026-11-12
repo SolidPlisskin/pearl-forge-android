@@ -15,15 +15,31 @@
         android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="true"
         android:theme="@style/Theme.PearlForge">
-        <!-- Rotating the tablet keeps the screen as it is, so nothing in progress is interrupted. -->
+        <!-- Rotating the tablet keeps the screen as it is, so nothing in progress is interrupted.
+             One window: a recording shared from another app opens in the Pearl Forge you already have. -->
         <activity
             android:name=".MainActivity"
             android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden|density|uiMode"
             android:exported="true"
+            android:launchMode="singleTask"
             android:windowSoftInputMode="adjustResize">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+            <!-- Share › Pearl Forge for a recording in another app, such as Plaud. -->
+            <intent-filter android:label="@string/app_name">
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="audio/*" />
+            </intent-filter>
+            <!-- Open with Pearl Forge, from Files and file managers. -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:scheme="content" />
+                <data android:scheme="file" />
+                <data android:mimeType="audio/*" />
             </intent-filter>
         </activity>
 

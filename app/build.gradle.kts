@@ -82,4 +82,8 @@ dependencies {
   implementation(libs.kotlinx.serialization.json)
   implementation(libs.androidx.compose.material.icons.extended)
   testImplementation(libs.okhttp.mockwebserver)
+
+  // Playing video pearls
+  implementation(libs.androidx.media3.exoplayer)
+  implementation(libs.androidx.media3.ui)
 }

@@ -92,6 +92,7 @@ fun CreateScreen(container: AppContainer, openTab: (AppTab) -> Unit) {
     val library = container.library
     val context = LocalContext.current
     var confirmingDiscard by remember { mutableStateOf(false) }
+    var confirmingReplace by remember { mutableStateOf(false) }
     var microphoneDenied by remember { mutableStateOf(false) }
 
     val hasVoice = settings.elevenLabsStatus != KeyStatus.NotSet && settings.selectedVoiceId.isNotEmpty()
@@ -119,6 +120,17 @@ fun CreateScreen(container: AppContainer, openTab: (AppTab) -> Unit) {
     }
     // Know how many ElevenLabs credits are left before showing a lecture's estimate.
     LaunchedEffect(model.lecture != null) { if (model.lecture != null) settings.refreshCredits() }
+
+    // Audio shared from another app waits until nothing is being refined, and asks before replacing a voice note that hasn't been refined yet.
+    fun useSharedAudio() {
+        val file = container.sharedAudio ?: return
+        container.sharedAudio = null
+        model.importSharedRecording(file)
+    }
+    LaunchedEffect(container.sharedAudio, model.isBusy) {
+        if (container.sharedAudio == null || model.isBusy || confirmingReplace) return@LaunchedEffect
+        if (model.hasUnrefinedRecording) confirmingReplace = true else useSharedAudio()
+    }
 
     ScreenScaffold("Pearl Forge", actions = {
         if (model.hasResult && !model.isBusy) IconButton(onClick = { model.startNew() }) { Icon(Icons.Filled.Add, "New") }
@@ -164,6 +176,24 @@ fun CreateScreen(container: AppContainer, openTab: (AppTab) -> Unit) {
                 LectureCostPaidSection(info)
             }
         }
+    }
+
+    if (confirmingReplace) {
+        AlertDialog(
+            onDismissRequest = {},
+            title = { Text("Replace your voice note?") },
+            text = { Text("The one on this screen hasn't been refined or saved yet.") },
+            confirmButton = {
+                TextButton(onClick = { confirmingReplace = false; useSharedAudio() }) { Text("Use the shared recording", color = MaterialTheme.colorScheme.error) }
+            },
+            dismissButton = {
+                TextButton(onClick = {
+                    confirmingReplace = false
+                    container.sharedAudio?.delete()
+                    container.sharedAudio = null
+                }) { Text("Keep mine") }
+            },
+        )
     }
 
     if (confirmingDiscard) {

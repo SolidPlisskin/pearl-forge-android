@@ -32,6 +32,17 @@ object TranslationPrompt {
 
         Output only the translation: no quotation marks, notes, alternatives or pronunciation guides.
         """.trimIndent().replace("{{L}}", language.name)
+
+    /** For a pearl's English version: what your voice says in a language you don't speak, so you can follow it. */
+    val english: String = """
+        Translate the user's text into English. It was written for them in another language and spoken in their own cloned voice, and they don't speak that language, so this is how they'll know exactly what they're saying.
+
+        - Keep the meaning exactly. Don't add, drop, soften, strengthen or explain anything; keep the first person, the tone and any hedging.
+        - Translate idioms and wordplay by meaning, as an English speaker would naturally say them.
+        - Keep names of people and places as they are.
+
+        Output only the translation: no quotation marks, notes, alternatives or romanization.
+        """.trimIndent()
 }
 
 /** What a recording is about: its broad topics and a one-line gist. */

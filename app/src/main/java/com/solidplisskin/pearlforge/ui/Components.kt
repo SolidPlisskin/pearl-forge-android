@@ -188,7 +188,7 @@ fun timeString(seconds: Double): String {
     return "%d:%02d".format(total / 60, total % 60)
 }
 
-/** Play/pause, a scrubber, and the elapsed and total time. */
+/** Play/pause, a scrubber, the elapsed and total time, and where it's playing. */
 @Composable
 fun PlayerRow(player: AudioPlayback) {
     Row(Modifier.fillMaxWidth().padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -200,8 +200,10 @@ fun PlayerRow(player: AudioPlayback) {
         Column(Modifier.weight(1f)) {
             Slider(value = player.currentTime.toFloat(), onValueChange = { player.seek(it.toDouble()) },
                    valueRange = 0f..maxOf(player.duration.toFloat(), 0.1f))
-            Row {
+            Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(timeString(player.currentTime), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Spacer(Modifier.weight(1f))
+                AudioOutputButton()
                 Spacer(Modifier.weight(1f))
                 Text(timeString(player.duration), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
@@ -291,6 +293,7 @@ fun EmptyState(icon: ImageVector, title: String, message: String) {
 }
 
 fun Date.mediumDateTime(): String = DateFormat.getDateTimeInstance(DateFormat.MEDIUM, DateFormat.SHORT).format(this)
+fun Date.mediumDate(): String = DateFormat.getDateInstance(DateFormat.MEDIUM).format(this)
 fun Date.fullDateTime(): String = DateFormat.getDateTimeInstance(DateFormat.FULL, DateFormat.SHORT).format(this)
 
 /** Opens a web page in the browser. */

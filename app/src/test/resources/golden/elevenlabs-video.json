@@ -1,0 +1,84 @@
+[
+  {
+    "headers" : {
+      "Content-Length" : "230",
+      "Content-Type" : "application/json",
+      "xi-api-key" : "test-eleven-key"
+    },
+    "json" : {
+      "audio" : {
+        "content_base64" : "SUQzBAUG",
+        "mime_type" : "audio/mpeg",
+        "type" : "inline_base64"
+      },
+      "image" : {
+        "content_base64" : "/9j/4AECAw==",
+        "mime_type" : "image/jpeg",
+        "type" : "inline_base64"
+      },
+      "model_id" : "creatify-aurora",
+      "resolution" : "720p"
+    },
+    "method" : "POST",
+    "url" : "https://api.elevenlabs.io/v1/flows/video"
+  },
+  {
+    "returned" : "flow-1"
+  },
+  {
+    "headers" : {
+      "xi-api-key" : "test-eleven-key"
+    },
+    "method" : "GET",
+    "url" : "https://api.elevenlabs.io/v1/flows/video/flow-1"
+  },
+  {
+    "returned" : "working"
+  },
+  {
+    "headers" : {
+      "xi-api-key" : "test-eleven-key"
+    },
+    "method" : "GET",
+    "url" : "https://api.elevenlabs.io/v1/flows/video/flow-1"
+  },
+  {
+    "returned" : "https://storage.example.com/video.mp4"
+  },
+  {
+    "headers" : {
+      "xi-api-key" : "test-eleven-key"
+    },
+    "method" : "GET",
+    "url" : "https://api.elevenlabs.io/v1/flows/video/flow-2"
+  },
+  {
+    "error" : "ElevenLabs couldn't make the video: No face found. Failed videos aren't charged."
+  },
+  {
+    "headers" : {
+      "Content-Length" : "230",
+      "Content-Type" : "application/json",
+      "xi-api-key" : "test-eleven-key"
+    },
+    "json" : {
+      "audio" : {
+        "content_base64" : "SUQzBAUG",
+        "mime_type" : "audio/mpeg",
+        "type" : "inline_base64"
+      },
+      "image" : {
+        "content_base64" : "/9j/4AECAw==",
+        "mime_type" : "image/jpeg",
+        "type" : "inline_base64"
+      },
+      "model_id" : "creatify-aurora",
+      "resolution" : "720p"
+    },
+    "method" : "POST",
+    "url" : "https://api.elevenlabs.io/v1/flows/video"
+  },
+  {
+    "error" : "Making videos from the app needs ElevenLabs Pro or higher. On your plan, make the video in ElevenLabs Avatars instead, then use Add video."
+  }
+]

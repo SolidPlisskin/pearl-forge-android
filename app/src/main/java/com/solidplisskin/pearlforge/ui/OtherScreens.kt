@@ -1,6 +1,19 @@
 package com.solidplisskin.pearlforge.ui
 
+import android.graphics.BitmapFactory
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.PickVisualMediaRequest
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
+import com.solidplisskin.pearlforge.pipeline.dollars
+import com.solidplisskin.pearlforge.settings.SettingsModel
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -90,7 +103,7 @@ fun ReadingScreen(container: AppContainer) {
                 shown.forEachIndexed { index, (reference, entry) ->
                     if (index > 0) RowDivider()
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Column(Modifier.weight(1f)) { ReferenceRow(reference, entry.meta.title) { openUrl(context, reference.url) } }
+                        Column(Modifier.weight(1f)) { ReferenceRow(reference, entry.displayTitle) { openUrl(context, reference.url) } }
                         Column {
                             IconButton(onClick = { shareText(context, reference.url) }) { Icon(Icons.Filled.Share, "Share link", tint = MaterialTheme.colorScheme.onSurfaceVariant) }
                             IconButton(onClick = { copyText(context, reference.url) }) { Icon(Icons.Filled.ContentCopy, "Copy link", tint = MaterialTheme.colorScheme.onSurfaceVariant) }
@@ -303,20 +316,32 @@ fun KeyEditor(container: AppContainer, target: KeyTarget, onBack: () -> Unit) {
     }
 }
 
-/** The ElevenLabs key, your voice, and where recordings are kept. */
+/** The ElevenLabs and fal.ai keys, your voice, the picture of your avatar and what makes video pearls, and where recordings are kept. */
 @Composable
-fun SettingsScreen(container: AppContainer, openKey: () -> Unit) {
+fun SettingsScreen(container: AppContainer, open: (SettingsRoute) -> Unit) {
     val settings = container.settings
+    var avatarError by remember { mutableStateOf<String?>(null) }
+    val pickAvatar = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
+        if (uri != null) container.scope.launch {
+            runCatching { settings.setAvatarPicture(uri) }.onSuccess { avatarError = null }.onFailure { avatarError = it.message }
+        }
+    }
+    fun chooseAvatar() = pickAvatar.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
     LaunchedEffect(Unit) { settings.checkSavedKeys() }
     ScreenScaffold("Settings") {
-        FormSection("API key", footer = {
+        FormSection("API keys", footer = {
             Column {
                 (settings.elevenLabsStatus as? KeyStatus.Failed)?.let { FooterText(it.message, isError = true) }
+                (settings.falStatus as? KeyStatus.Failed)?.let { FooterText(it.message, isError = true) }
                 FooterText("Kept encrypted on this tablet: never in the app's code, and never copied off it. Keys for the AI that polishes your thoughts are in the AI tab.")
             }
         }) {
-            KeyStatusRow("ElevenLabs", "Speech-to-text and your voice", settings.elevenLabsStatus, openKey)
+            KeyStatusRow("ElevenLabs", "Speech-to-text and your voice", settings.elevenLabsStatus) { open(SettingsRoute.ELEVENLABS_KEY) }
             if (settings.elevenLabsStatus is KeyStatus.Failed) TextButton(onClick = { container.scope.launch { settings.loadVoices() } }) { Text("Check again") }
+            RowDivider()
+            val falSubtitle = settings.falBalance?.let { "Videos of your avatar · ${it.dollars} left" } ?: "Videos of your avatar"
+            KeyStatusRow("fal.ai", falSubtitle, settings.falStatus) { open(SettingsRoute.FAL_KEY) }
+            if (settings.falStatus is KeyStatus.Failed) TextButton(onClick = { container.scope.launch { settings.checkFalKey() } }) { Text("Check fal.ai again") }
         }
         FormSection("Voice", footer = { FooterText("Pearl Forge reads your refined thoughts back in this voice. Voices you made yourself are listed first.") }) {
             when {
@@ -333,10 +358,43 @@ fun SettingsScreen(container: AppContainer, openKey: () -> Unit) {
                 }
             }
         }
+        FormSection("Video avatar", footer = {
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                avatarError?.let { FooterText(it, isError = true) }
+                FooterText(videoFooter(settings))
+            }
+        }) {
+            val picture = settings.avatarPicture
+            val image = remember(picture) { picture?.let { runCatching { BitmapFactory.decodeByteArray(it, 0, it.size)?.asImageBitmap() }.getOrNull() } }
+            if (image != null) {
+                Row(Modifier.padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Image(image, "Your avatar", Modifier.size(72.dp).clip(RoundedCornerShape(12.dp)), contentScale = ContentScale.Crop)
+                    Spacer(Modifier.width(14.dp))
+                    Text("Your avatar")
+                }
+                TextButton(onClick = ::chooseAvatar) { Text("Choose a different picture…") }
+                TextButton(onClick = { settings.removeAvatarPicture() }) { Text("Remove picture", color = MaterialTheme.colorScheme.error) }
+            } else {
+                TextButton(onClick = ::chooseAvatar) { Text("Choose a picture of your avatar…") }
+            }
+            RowDivider()
+            LabeledRow("Make videos with", settings.videoModel.name, onClick = { open(SettingsRoute.VIDEO_MODELS) })
+        }
         FormSection("Storage", footer = {
             FooterText("Recordings are kept in Pearl Forge's own folder on this tablet (Android › data › com.solidplisskin.pearlforge › files › Recordings), in the same format as the iPhone app. Updates keep them, but uninstalling Pearl Forge deletes them, so copy that folder to your computer over USB to back them up.")
         }) {
             LabeledRow("Saved in", container.library.locationName)
         }
     }
+}
+
+private fun videoFooter(settings: SettingsModel): String {
+    val picture = "For Make video on a pearl: this picture is animated to speak the pearl in your voice. Use a clear, front-facing still of your ElevenLabs avatar: open it in ElevenLabs Avatars, then save its picture to Photos (or take a screenshot and crop it)."
+    val video = settings.videoModel
+    if (!video.isFal) {
+        return "$picture Making videos with ElevenLabs needs its Pro plan or higher; on any paid plan you can make them in ElevenLabs and use Add video instead."
+    }
+    var line = "$picture ${video.name} on fal.ai makes them, paid from your fal.ai balance."
+    if (settings.falStatus == KeyStatus.NotSet) line += " Add your fal.ai key above first."
+    return "$line Pearl Forge asks fal.ai to delete the uploaded picture and audio after a day, and the finished video after a week; your copy stays with the pearl."
 }

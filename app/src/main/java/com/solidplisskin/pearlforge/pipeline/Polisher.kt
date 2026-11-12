@@ -9,6 +9,8 @@ enum class Credential(val id: String) {
     OPENAI_KEY("openai-api-key"),
     GEMINI_KEY("gemini-api-key"),
     OPENROUTER_KEY("openrouter-api-key"),
+    /** fal.ai, for videos of your avatar. */
+    FAL_KEY("fal-api-key"),
 }
 
 /** The AI services that can polish a transcript. */

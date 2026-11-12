@@ -1,0 +1,1 @@
+Making videos from the app needs ElevenLabs Pro or higher. On your plan, make the video in ElevenLabs Avatars instead, then use Add video.

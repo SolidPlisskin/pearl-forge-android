@@ -1,0 +1,54 @@
+{
+  "categories" : [
+    "Books & Stories"
+  ],
+  "created" : "2025-11-07T10:19:51Z",
+  "favorite" : false,
+  "pearls" : [
+    {
+      "audio_file" : "pearl-01-clean.mp3",
+      "created" : "2025-11-07T10:19:51Z",
+      "english" : "Alas, eleventy-one years among such excellent and admirable hobbits! I don't know half of you \"half\" as well as I'd like.\nAnd/or less.",
+      "id" : "7C0FC1AB-7D2C-4A3B-842E-46D2D506986A",
+      "mode" : "clean",
+      "notes" : "Say it in French, the way a native speaker would.",
+      "number" : 1,
+      "polisher" : "anthropic",
+      "refined_by" : "claude-opus-5-5",
+      "text_file" : "pearl-01-clean.txt",
+      "video_cost" : 0.694402612244898,
+      "video_file" : "pearl-01-clean.mp4",
+      "video_model" : "fal-ai/kling-video/ai-avatar/v2/standard",
+      "video_seconds" : 12.35591836734694,
+      "voice_id" : "VOICE_ID"
+    },
+    {
+      "audio_file" : "pearl-02-tighten.mp3",
+      "created" : "2025-11-07T10:29:51Z",
+      "id" : "C151DE99-656E-41DF-A2AA-2BCB24550A7D",
+      "mode" : "tighten",
+      "number" : 2,
+      "polisher" : "openai",
+      "refined_by" : "gpt-5.5",
+      "text_file" : "pearl-02-tighten.txt",
+      "video_credits" : 4200,
+      "video_generation_id" : "01a1b66b-492f-7d50-9372-7ac74c31fbef",
+      "video_seconds" : 10,
+      "voice_id" : "VOICE_ID"
+    },
+    {
+      "created" : "2025-11-07T10:39:51Z",
+      "id" : "0A9B8C7D-6E5F-4A3B-8C2D-1E0F9A8B7C6D",
+      "mode" : "summarize",
+      "number" : 3,
+      "text_file" : "pearl-03-summarize.txt",
+      "video_cost" : 3,
+      "video_file" : "pearl-03-summarize.mov"
+    }
+  ],
+  "references" : [
+
+  ],
+  "title" : "Hélas, onzante-et-un ans parmi des hobbits si excellents et si admirables ! Je n",
+  "typed" : true
+}

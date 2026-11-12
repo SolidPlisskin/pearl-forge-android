@@ -26,6 +26,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.VerticalDivider
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
@@ -58,6 +59,9 @@ sealed interface HistoryRoute {
     data class Topic(val name: String) : HistoryRoute
 }
 
+/** Screens reached from Settings. */
+enum class SettingsRoute { ELEVENLABS_KEY, FAL_KEY, VIDEO_MODELS }
+
 /** Screens reached from the AI tab. */
 sealed interface AIRoute {
     data class Provider(val provider: PolisherProvider) : AIRoute
@@ -74,7 +78,7 @@ fun PearlForgeApp(container: AppContainer) {
     var tab by remember { mutableStateOf(AppTab.CREATE) }
     val history = remember { mutableStateListOf<HistoryRoute>() }
     val ai = remember { mutableStateListOf<AIRoute>() }
-    var editingElevenLabsKey by remember { mutableStateOf(false) }
+    var settingsRoute by remember { mutableStateOf<SettingsRoute?>(null) }
     val context = LocalContext.current
     val historyPlayer = remember { AudioPlayback(context) }
 
@@ -83,61 +87,74 @@ fun PearlForgeApp(container: AppContainer) {
         container.scope.launch { container.polishers.checkSavedKeys() }
         container.library.refresh()
     }
+    // A recording shared from another app goes to the Create screen.
+    LaunchedEffect(container.sharedAudio) { if (container.sharedAudio != null) tab = AppTab.CREATE }
 
     BackHandler(enabled = (tab == AppTab.HISTORY && history.isNotEmpty()) || (tab == AppTab.AI && ai.isNotEmpty()) ||
-                    (tab == AppTab.SETTINGS && editingElevenLabsKey) || tab != AppTab.CREATE) {
+                    (tab == AppTab.SETTINGS && settingsRoute != null) || tab != AppTab.CREATE) {
         when {
             tab == AppTab.HISTORY && history.isNotEmpty() -> history.removeAt(history.lastIndex)
             tab == AppTab.AI && ai.isNotEmpty() -> ai.removeAt(ai.lastIndex)
-            tab == AppTab.SETTINGS && editingElevenLabsKey -> editingElevenLabsKey = false
+            tab == AppTab.SETTINGS && settingsRoute != null -> settingsRoute = null
             else -> tab = AppTab.CREATE
         }
     }
 
     fun openTab(target: AppTab) { tab = target }
 
-    BoxWithConstraints(Modifier.fillMaxSize()) {
-        val wide = maxWidth >= 600.dp
-        val twoPane = maxWidth >= 900.dp
+    CompositionLocalProvider(LocalAudioOutput provides container.audioOutput) {
+        BoxWithConstraints(Modifier.fillMaxSize()) {
+            val wide = maxWidth >= 600.dp
+            val twoPane = maxWidth >= 900.dp
 
-        @Composable
-        fun content() {
-            Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
-                when (tab) {
-                    AppTab.CREATE -> CreateScreen(container, ::openTab)
-                    AppTab.HISTORY -> HistoryTab(container, history, historyPlayer, twoPane, ::openTab)
-                    AppTab.READING -> ReadingScreen(container)
-                    AppTab.AI -> AITab(container, ai)
-                    AppTab.SETTINGS -> if (editingElevenLabsKey) {
-                        KeyEditor(container, KeyTarget(
-                            title = "ElevenLabs key", keysPageLabel = "Get your key at elevenlabs.io",
-                            keysPage = "https://elevenlabs.io/app/settings/api-keys", usesWorkspace = false,
-                            isSaved = container.settings.elevenLabsStatus != KeyStatus.NotSet, workspace = "",
-                            save = { key, _ -> if (key != null) container.settings.saveElevenLabsKey(key) },
-                            remove = { container.settings.removeElevenLabsKey() },
-                        )) { editingElevenLabsKey = false }
-                    } else SettingsScreen(container) { editingElevenLabsKey = true }
-                }
-            }
-        }
-
-        if (wide) {
-            Row(Modifier.fillMaxSize()) {
-                NavigationRail {
-                    AppTab.entries.forEach { item ->
-                        NavigationRailItem(selected = tab == item, onClick = { tab = item }, icon = { Icon(item.icon, null) }, label = { Text(item.label) })
+            @Composable
+            fun content() {
+                Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
+                    when (tab) {
+                        AppTab.CREATE -> CreateScreen(container, ::openTab)
+                        AppTab.HISTORY -> HistoryTab(container, history, historyPlayer, twoPane, ::openTab)
+                        AppTab.READING -> ReadingScreen(container)
+                        AppTab.AI -> AITab(container, ai)
+                        AppTab.SETTINGS -> when (settingsRoute) {
+                            SettingsRoute.ELEVENLABS_KEY -> KeyEditor(container, KeyTarget(
+                                title = "ElevenLabs key", keysPageLabel = "Get your key at elevenlabs.io",
+                                keysPage = "https://elevenlabs.io/app/settings/api-keys", usesWorkspace = false,
+                                isSaved = container.settings.elevenLabsStatus != KeyStatus.NotSet, workspace = "",
+                                save = { key, _ -> if (key != null) container.settings.saveElevenLabsKey(key) },
+                                remove = { container.settings.removeElevenLabsKey() },
+                            )) { settingsRoute = null }
+                            SettingsRoute.FAL_KEY -> KeyEditor(container, KeyTarget(
+                                title = "fal.ai key", keysPageLabel = "Get your key at fal.ai (the API preset is enough)",
+                                keysPage = "https://fal.ai/dashboard/keys", usesWorkspace = false,
+                                isSaved = container.settings.falStatus != KeyStatus.NotSet, workspace = "",
+                                save = { key, _ -> if (key != null) container.settings.saveFalKey(key) },
+                                remove = { container.settings.removeFalKey() },
+                            )) { settingsRoute = null }
+                            SettingsRoute.VIDEO_MODELS -> VideoModelList(container) { settingsRoute = null }
+                            null -> SettingsScreen(container) { settingsRoute = it }
+                        }
                     }
                 }
-                Box(Modifier.weight(1f)) { content() }
             }
-        } else {
-            Scaffold(bottomBar = {
-                NavigationBar {
-                    AppTab.entries.forEach { item ->
-                        NavigationBarItem(selected = tab == item, onClick = { tab = item }, icon = { Icon(item.icon, null) }, label = { Text(item.label) })
+
+            if (wide) {
+                Row(Modifier.fillMaxSize()) {
+                    NavigationRail {
+                        AppTab.entries.forEach { item ->
+                            NavigationRailItem(selected = tab == item, onClick = { tab = item }, icon = { Icon(item.icon, null) }, label = { Text(item.label) })
+                        }
                     }
+                    Box(Modifier.weight(1f)) { content() }
                 }
-            }) { padding -> Box(Modifier.fillMaxSize().padding(padding)) { content() } }
+            } else {
+                Scaffold(bottomBar = {
+                    NavigationBar {
+                        AppTab.entries.forEach { item ->
+                            NavigationBarItem(selected = tab == item, onClick = { tab = item }, icon = { Icon(item.icon, null) }, label = { Text(item.label) })
+                        }
+                    }
+                }) { padding -> Box(Modifier.fillMaxSize().padding(padding)) { content() } }
+            }
         }
     }
 }
@@ -149,6 +166,11 @@ private fun HistoryTab(container: AppContainer, stack: MutableList<HistoryRoute>
         if (twoPane && route is HistoryRoute.Recording && stack.none { it is HistoryRoute.Topic }) stack.clear()
         stack.add(route)
     }
+    fun openFromList(route: HistoryRoute) {
+        // A video opened from the Videos list replaces what's on the right too.
+        if (twoPane && route is HistoryRoute.PearlPage) stack.clear()
+        open(route)
+    }
     fun back() { if (stack.isNotEmpty()) stack.removeAt(stack.lastIndex) }
 
     @Composable
@@ -159,9 +181,10 @@ private fun HistoryTab(container: AppContainer, stack: MutableList<HistoryRoute>
     }
 
     val selected = (stack.lastOrNull { it is HistoryRoute.Recording } as? HistoryRoute.Recording)?.id
+    val selectedPearl = (stack.lastOrNull() as? HistoryRoute.PearlPage)?.pearlId
     if (twoPane) {
         Row(Modifier.fillMaxSize()) {
-            Box(Modifier.width(400.dp).fillMaxHeight()) { HistoryList(container, selected, ::open, openTab) }
+            Box(Modifier.width(400.dp).fillMaxHeight()) { HistoryList(container, selected, selectedPearl, player, ::openFromList, openTab) }
             VerticalDivider()
             Box(Modifier.weight(1f).fillMaxHeight()) {
                 val top = stack.lastOrNull()
@@ -171,7 +194,7 @@ private fun HistoryTab(container: AppContainer, stack: MutableList<HistoryRoute>
         }
     } else {
         val top = stack.lastOrNull()
-        if (top == null) HistoryList(container, null, ::open, openTab) else page(top, showBack = true)
+        if (top == null) HistoryList(container, null, null, player, ::openFromList, openTab) else page(top, showBack = true)
     }
 }
 

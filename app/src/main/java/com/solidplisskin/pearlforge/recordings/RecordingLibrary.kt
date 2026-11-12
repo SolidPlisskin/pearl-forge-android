@@ -1,10 +1,19 @@
 package com.solidplisskin.pearlforge.recordings
 
 import android.content.Context
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.media.MediaMetadataRetriever
+import android.net.Uri
+import android.os.Build
+import android.provider.OpenableColumns
+import android.webkit.MimeTypeMap
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import com.solidplisskin.pearlforge.pipeline.AvatarVideo
 import com.solidplisskin.pearlforge.pipeline.Forge
 import com.solidplisskin.pearlforge.pipeline.ForgeStep
 import com.solidplisskin.pearlforge.pipeline.PearlJson
@@ -14,6 +23,8 @@ import com.solidplisskin.pearlforge.pipeline.PolisherProvider
 import com.solidplisskin.pearlforge.pipeline.Refinement
 import com.solidplisskin.pearlforge.pipeline.RefinementMode
 import com.solidplisskin.pearlforge.pipeline.ResearchLoop
+import com.solidplisskin.pearlforge.pipeline.VideoFailed
+import com.solidplisskin.pearlforge.pipeline.VideoModel
 import com.solidplisskin.pearlforge.pipeline.WrittenLecture
 import com.solidplisskin.pearlforge.pipeline.asArray
 import com.solidplisskin.pearlforge.pipeline.asObject
@@ -23,7 +34,12 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import java.util.UUID
+import kotlin.coroutines.cancellation.CancellationException
+import kotlin.math.max
+import kotlin.math.roundToInt
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.JsonArray
 
@@ -35,6 +51,9 @@ import kotlinx.serialization.json.JsonArray
  *     ├── original_transcript.txt    what you actually said
  *     ├── pearl-01-clean.txt         each run through the forge…
  *     ├── pearl-01-clean.mp3         …and that run in your voice
+ *     ├── pearl-02-tighten.txt
+ *     ├── pearl-02-tighten.mp3
+ *     ├── pearl-02-tighten.mp4       …and, if you made one, as a video
  *     └── meta.json
  */
 object RecordingFiles {
@@ -61,19 +80,23 @@ object RecordingFiles {
     fun decodeMeta(text: String): RecordingMeta? =
         runCatching { PearlJson.parseToJsonElement(text).asObject()?.let(RecordingMeta::fromJson) }.getOrNull()
 
-    /** A file name for sharing a pearl's audio: "I suspect emotional desensitization… – pearl 2.mp3". */
-    fun shareName(title: String, pearlNumber: Int): String {
+    /** A file name for sharing a pearl's audio (or video): "I suspect emotional desensitization… – pearl 2.mp3". */
+    fun shareName(title: String, pearlNumber: Int, fileExtension: String = "mp3"): String {
         val cleaned = title.replace(Regex("""[/\\:?%*|"<>\n\r]"""), " ").split(" ").filter { it.isNotEmpty() }.joinToString(" ")
-        return "${cleaned.take(60).ifEmpty { "Pearl Forge" }} – pearl $pearlNumber.mp3"
+        return "${cleaned.take(60).ifEmpty { "Pearl Forge" }} – pearl $pearlNumber.$fileExtension"
     }
 }
 
 /**
  * Every saved recording. A copy of each recording's details and texts is kept so History opens
- * instantly; audio is read only when you play it. State is observable by the screens.
+ * instantly; audio is read only when you play it. State is observable by the screens. `scope` runs
+ * work that shouldn't hold anything up, such as writing a new pearl's English version.
  */
-class RecordingLibrary(context: Context) {
+class RecordingLibrary(context: Context, private val scope: CoroutineScope) {
     private val indexFile = File(context.filesDir, "RecordingIndex.json")
+    private val resolver = context.contentResolver
+    private val stillFolder = File(context.cacheDir, "VideoStills")
+    private val shareFolder = File(context.cacheDir, "shared")
 
     /** Where recordings are saved: app storage on this tablet, visible from a computer over USB. */
     val root: File = File(context.getExternalFilesDir(null) ?: context.filesDir, "Recordings").apply { mkdirs() }
@@ -95,6 +118,17 @@ class RecordingLibrary(context: Context) {
     val referenceErrors = mutableStateMapOf<String, String>()
     /** What the last reference search for a recording found. */
     val referenceNotices = mutableStateMapOf<String, String>()
+    /** What's happening with a pearl's video being made right now, per pearl. */
+    val videoWork = mutableStateMapOf<UUID, String>()
+    val videoErrors = mutableStateMapOf<UUID, String>()
+    /** Goes up each time a pearl's video changes, so its still is redrawn. */
+    val videoRevisions = mutableStateMapOf<UUID, Int>()
+    /** Pearls whose English version is being written right now. */
+    val translating = mutableStateMapOf<UUID, Boolean>()
+    val translationErrors = mutableStateMapOf<UUID, String>()
+    /** Goes up once the languages of what's in the library have been worked out, so the screens label them. */
+    var languageRevision by mutableIntStateOf(0)
+        private set
 
     fun entry(id: String): RecordingEntry? = entries.firstOrNull { it.id == id }
 
@@ -111,6 +145,22 @@ class RecordingLibrary(context: Context) {
         entries = scanned.sortedByDescending { it.meta.created }
         saveIndex()
         isRefreshing = false
+        learnLanguages(entries)
+    }
+
+    /**
+     * Works out the language of every title and text off the main thread, where Android's own
+     * language detector may be asked about the hard ones, so the screens only read the answers.
+     */
+    private suspend fun learnLanguages(entries: List<RecordingEntry>) {
+        withContext(Dispatchers.Default) {
+            for (entry in entries) {
+                TextLanguage.code(entry.meta.title)
+                TextLanguage.code(entry.transcript)
+                entry.pearlTexts.values.forEach(TextLanguage::code)
+            }
+        }
+        languageRevision += 1
     }
 
     private fun scan(cached: Map<String, RecordingEntry>): List<RecordingEntry> =
@@ -172,6 +222,7 @@ class RecordingLibrary(context: Context) {
             File(folder, RecordingFiles.META).writeText(RecordingFiles.encodeMeta(meta))
         }
         val entry = RecordingEntry(folderName, meta, transcript, mapOf(pearl.id to text))
+        learnLanguages(listOf(entry))
         replace(entry)
         return entry to pearl
     }
@@ -183,6 +234,7 @@ class RecordingLibrary(context: Context) {
         val pearl = Pearl(UUID.randomUUID(), number, Date(), mode, notes, refinement.model, refinement.provider.raw, voiceId,
                           Pearl.baseName(number, mode) + ".txt")
         writeText(refinement.text, pearl.textFile, entryId)
+        withContext(Dispatchers.Default) { TextLanguage.code(refinement.text) }
         save(entry.copy(meta = entry.meta.copy(pearls = entry.meta.pearls + pearl), pearlTexts = entry.pearlTexts + (pearl.id to refinement.text)))
         return pearl
     }
@@ -192,7 +244,9 @@ class RecordingLibrary(context: Context) {
         val entry = entry(entryId) ?: throw missingRecording
         val pearl = entry.pearl(pearlId) ?: throw missingRecording
         writeText(text, pearl.textFile, entryId)
-        var meta = entry.meta
+        withContext(Dispatchers.Default) { TextLanguage.code(text); TextLanguage.code(RecordingFiles.title(text)) }
+        // Edited text loses its English version.
+        var meta = entry.meta.copy(pearls = entry.meta.pearls.map { if (it.id == pearlId) it.copy(english = null) else it })
         if (pearl.number == meta.pearls.minOf { it.number } && meta.lecture == null) meta = meta.copy(title = RecordingFiles.title(text))
         save(entry.copy(meta = meta, pearlTexts = entry.pearlTexts + (pearlId to text)))
     }
@@ -215,8 +269,9 @@ class RecordingLibrary(context: Context) {
     suspend fun deletePearl(pearlId: UUID, entryId: String) {
         val entry = entry(entryId) ?: return
         val pearl = entry.pearl(pearlId) ?: return
-        withContext(Dispatchers.IO) { listOfNotNull(pearl.textFile, pearl.audioFile).forEach { File(File(root, entryId), it).delete() } }
+        withContext(Dispatchers.IO) { listOfNotNull(pearl.textFile, pearl.audioFile, pearl.videoFile).forEach { File(File(root, entryId), it).delete() } }
         save(entry.copy(meta = entry.meta.copy(pearls = entry.meta.pearls.filter { it.id != pearlId }), pearlTexts = entry.pearlTexts - pearlId))
+        if (pearl.videoFile != null) forgetStill(pearlId)
     }
 
     /** Deletes a recording's whole folder: the original and every pearl. */
@@ -245,6 +300,8 @@ class RecordingLibrary(context: Context) {
             forging[entryId] = ForgeStep.SPEAKING
             val audio = Forge.speak(refinement.text, voiceId)
             setAudio(audio, pearl.id, entryId, voiceId)
+            // A pearl in another language gets its English version in the background; it doesn't hold up playing it.
+            scope.launch { addEnglishIfMissing(pearl.id, entryId, polisher) }
             (entry(entryId)?.pearl(pearl.id) ?: pearl) to audio
         } catch (error: Exception) {
             forgeErrors[entryId] = error.message ?: "Something went wrong."
@@ -275,6 +332,228 @@ class RecordingLibrary(context: Context) {
         } finally {
             forging.remove(entryId)
         }
+    }
+
+    // MARK: Videos
+
+    /** A pearl's video file, if it has one. */
+    fun videoFile(pearl: Pearl, entryId: String): File? = pearl.videoFile?.let { File(File(root, entryId), it) }
+
+    /** Copies a video you picked (from Photos or Files) into the recording's folder as the pearl's video, replacing any it had. */
+    suspend fun addVideo(source: Uri, pearlId: UUID, entryId: String) {
+        val pearl = entry(entryId)?.pearl(pearlId) ?: throw missingRecording
+        val folder = File(root, entryId)
+        val oldFile = pearl.videoFile
+        val file = withContext(Dispatchers.IO) {
+            val name = Pearl.baseName(pearl.number, pearl.mode) + "." + videoExtension(source)
+            val input = resolver.openInputStream(source) ?: throw PipelineError("That video couldn't be opened.")
+            input.use { stream -> File(folder, name).outputStream().use { stream.copyTo(it) } }
+            if (oldFile != null && oldFile != name) File(folder, oldFile).delete()
+            name
+        }
+        updatePearl(pearlId, entryId) {
+            it.copy(videoFile = file, videoGenerationId = null, videoModel = null, videoCredits = null, videoCost = null, videoSeconds = null)
+        }
+        forgetStill(pearlId)
+    }
+
+    /** "mp4", "mov": a picked video's own file type. */
+    private fun videoExtension(source: Uri): String {
+        val name = runCatching {
+            resolver.query(source, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { if (it.moveToFirst()) it.getString(0) else null }
+        }.getOrNull()
+        val fromName = name?.substringAfterLast('.', "")?.lowercase()?.takeIf { it.isNotEmpty() && it.length <= 5 }
+        return fromName ?: resolver.getType(source)?.let { MimeTypeMap.getSingleton().getExtensionFromMimeType(it) } ?: "mp4"
+    }
+
+    suspend fun removeVideo(pearlId: UUID, entryId: String) {
+        val file = entry(entryId)?.pearl(pearlId)?.videoFile ?: return
+        withContext(Dispatchers.IO) { File(File(root, entryId), file).delete() }
+        updatePearl(pearlId, entryId) { it.copy(videoFile = null, videoModel = null, videoCredits = null, videoCost = null, videoSeconds = null) }
+        forgetStill(pearlId)
+    }
+
+    /** A copy of a pearl's video named after the recording, for sharing. */
+    suspend fun videoShareCopy(pearlId: UUID, entryId: String): File {
+        val entry = entry(entryId) ?: throw missingRecording
+        val pearl = entry.pearl(pearlId) ?: throw missingRecording
+        val source = videoFile(pearl, entryId) ?: throw missingRecording
+        return withContext(Dispatchers.IO) {
+            File(shareFolder.apply { mkdirs() }, RecordingFiles.shareName(entry.meta.title, pearl.number, source.extension.ifEmpty { "mp4" }))
+                .also { source.copyTo(it, overwrite = true) }
+        }
+    }
+
+    /**
+     * Has ElevenLabs or a fal.ai model make a video of your avatar speaking the pearl's audio, and
+     * saves it with the pearl. Progress and errors are in `videoWork` and `videoErrors`.
+     */
+    suspend fun makeVideo(pearlId: UUID, entryId: String, picture: ByteArray, model: VideoModel) {
+        if (videoWork[pearlId] != null) return
+        val audioFile = entry(entryId)?.pearl(pearlId)?.audioFile ?: return
+        runVideoWork(pearlId, entryId) {
+            val maker = if (model.isFal) "fal.ai" else "ElevenLabs"
+            videoWork[pearlId] = "Sending your pearl to $maker…"
+            val file = audioFile(audioFile, entryId)
+            val audio = withContext(Dispatchers.IO) { file.readBytes() }
+            val seconds = withContext(Dispatchers.IO) { AvatarVideo.seconds(file) }
+            val endpoint = model.falEndpoint
+            if (endpoint != null) {
+                val client = Forge.fal()
+                val id = client.startVideo(model, picture, audio, file.extension)
+                updatePearl(pearlId, entryId) {
+                    it.copy(videoGenerationId = id, videoModel = endpoint, videoSeconds = seconds, videoCost = seconds?.let(model::cost), videoCredits = null)
+                }
+                saveFinishedVideo(pearlId, entryId, maker) { client.waitForVideo(id, endpoint) }
+            } else {
+                val client = Forge.elevenLabs()
+                val before = runCatching { client.credits() }.getOrNull()
+                val id = client.startLipSyncVideo(picture, audio)
+                updatePearl(pearlId, entryId) {
+                    it.copy(videoGenerationId = id, videoModel = null, videoSeconds = seconds, videoCost = null, videoCredits = null)
+                }
+                saveFinishedVideo(pearlId, entryId, maker) { client.waitForVideo(id) }
+                // What it cost: the change in credits used, when nothing else (such as a monthly reset) got in the way of measuring it.
+                val after = runCatching { client.credits() }.getOrNull()
+                if (before != null && after != null && after.used > before.used) {
+                    updatePearl(pearlId, entryId) { it.copy(videoCredits = after.used - before.used) }
+                }
+            }
+        }
+    }
+
+    /** Picks up a video ElevenLabs or fal.ai was still making when Pearl Forge was last closed or lost its connection. */
+    suspend fun collectVideo(pearlId: UUID, entryId: String) {
+        if (videoWork[pearlId] != null) return
+        val pearl = entry(entryId)?.pearl(pearlId) ?: return
+        val id = pearl.videoGenerationId ?: return
+        runVideoWork(pearlId, entryId) {
+            val endpoint = pearl.videoModel
+            if (endpoint != null) {
+                val client = Forge.fal()
+                saveFinishedVideo(pearlId, entryId, "fal.ai") { client.waitForVideo(id, endpoint) }
+            } else {
+                val client = Forge.elevenLabs()
+                saveFinishedVideo(pearlId, entryId, "ElevenLabs") { client.waitForVideo(id) }
+            }
+        }
+    }
+
+    private suspend fun runVideoWork(pearlId: UUID, entryId: String, work: suspend () -> Unit) {
+        videoErrors.remove(pearlId)
+        try {
+            work()
+        } catch (failure: VideoFailed) {
+            videoErrors[pearlId] = failure.message ?: "The video couldn't be made."
+            runCatching { updatePearl(pearlId, entryId) { it.copy(videoGenerationId = null, videoCost = null) } }
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (error: Exception) {
+            // Anything else leaves a started video on record, for Collect video to pick up once it's finished.
+            videoErrors[pearlId] = error.message ?: "Something went wrong."
+        } finally {
+            videoWork.remove(pearlId)
+        }
+    }
+
+    /** Waits for the video being made, then saves it as the pearl's video. */
+    private suspend fun saveFinishedVideo(pearlId: UUID, entryId: String, maker: String, download: suspend () -> ByteArray) {
+        videoWork[pearlId] = "$maker is making your video. This takes a few minutes…"
+        val video = download()
+        videoWork[pearlId] = "Saving the video…"
+        val pearl = entry(entryId)?.pearl(pearlId) ?: throw missingRecording
+        val file = Pearl.baseName(pearl.number, pearl.mode) + ".mp4"
+        val folder = File(root, entryId)
+        val oldFile = pearl.videoFile
+        withContext(Dispatchers.IO) {
+            File(folder, file).writeBytes(video)
+            if (oldFile != null && oldFile != file) File(folder, oldFile).delete()
+        }
+        updatePearl(pearlId, entryId) { it.copy(videoFile = file, videoGenerationId = null) }
+        forgetStill(pearlId)
+    }
+
+    /** A still from a pearl's video for the library, made once and kept in the app's cache. */
+    suspend fun videoStill(pearlId: UUID, entryId: String): Bitmap? {
+        val pearl = entry(entryId)?.pearl(pearlId) ?: return null
+        val video = videoFile(pearl, entryId) ?: return null
+        val still = File(stillFolder, pearlId.upper + ".jpg")
+        return withContext(Dispatchers.IO) {
+            BitmapFactory.decodeFile(still.path)?.let { return@withContext it }
+            if (!video.exists()) return@withContext null
+            val retriever = MediaMetadataRetriever()
+            try {
+                retriever.setDataSource(video.path)
+                // A moment in, past any fade from black.
+                val frame = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
+                    retriever.getScaledFrameAtTime(500_000, MediaMetadataRetriever.OPTION_CLOSEST, 300, 300)
+                } else retriever.getFrameAtTime(500_000, MediaMetadataRetriever.OPTION_CLOSEST)?.let(::fitInStill)
+                frame?.also { image ->
+                    stillFolder.mkdirs()
+                    runCatching { still.outputStream().use { image.compress(Bitmap.CompressFormat.JPEG, 80, it) } }
+                }
+            } catch (_: Exception) {
+                null
+            } finally {
+                retriever.release()
+            }
+        }
+    }
+
+    /** Shrinks a frame to fit in 300 by 300 pixels, keeping its shape. */
+    private fun fitInStill(frame: Bitmap): Bitmap {
+        val scale = 300.0 / max(frame.width, frame.height)
+        if (scale >= 1) return frame
+        return Bitmap.createScaledBitmap(frame, (frame.width * scale).roundToInt(), (frame.height * scale).roundToInt(), true)
+    }
+
+    private fun forgetStill(pearlId: UUID) {
+        File(stillFolder, pearlId.upper + ".jpg").delete()
+        videoRevisions[pearlId] = (videoRevisions[pearlId] ?: 0) + 1
+    }
+
+    // MARK: English versions
+
+    /** Every pearl in another language that has no English version yet, with its recording. */
+    val pearlsMissingEnglish: List<Pair<String, UUID>>
+        get() = entries.flatMap { entry -> entry.pearlsMissingEnglish.map { entry.id to it.id } }
+
+    /** Has the AI write a pearl's English version and saves it with the pearl. Failures are kept in `translationErrors`. */
+    suspend fun addEnglish(pearlId: UUID, entryId: String, choice: PolisherChoice) {
+        if (translating[pearlId] == true) return
+        val text = entry(entryId)?.pearlTexts?.get(pearlId)?.takeIf { it.isNotEmpty() } ?: return
+        translating[pearlId] = true
+        translationErrors.remove(pearlId)
+        try {
+            val english = Forge.english(text, choice)
+            // Only if the text wasn't edited in the meantime.
+            if (entry(entryId)?.pearlTexts?.get(pearlId) != text) return
+            updatePearl(pearlId, entryId) { it.copy(english = english) }
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (error: Exception) {
+            translationErrors[pearlId] = error.message ?: "Translation failed."
+        } finally {
+            translating.remove(pearlId)
+        }
+    }
+
+    /** Adds an English version to a new pearl when it's in another language. */
+    suspend fun addEnglishIfMissing(pearlId: UUID, entryId: String, choice: PolisherChoice) {
+        val entry = entry(entryId) ?: return
+        if (entry.pearlsMissingEnglish.none { it.id == pearlId }) return
+        addEnglish(pearlId, entryId, choice)
+    }
+
+    /** Adds English versions to every pearl missing one, one at a time. */
+    suspend fun addEnglishToAll(choice: PolisherChoice) {
+        for ((entryId, pearlId) in pearlsMissingEnglish) addEnglish(pearlId, entryId, choice)
+    }
+
+    private suspend fun updatePearl(pearlId: UUID, entryId: String, change: (Pearl) -> Pearl) {
+        val entry = entry(entryId) ?: throw missingRecording
+        if (entry.pearl(pearlId) == null) throw missingRecording
+        save(entry.copy(meta = entry.meta.copy(pearls = entry.meta.pearls.map { if (it.id == pearlId) change(it) else it })))
     }
 
     // MARK: Topics

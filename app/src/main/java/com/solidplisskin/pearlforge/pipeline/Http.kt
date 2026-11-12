@@ -1,7 +1,9 @@
 package com.solidplisskin.pearlforge.pipeline
 
 import java.io.IOException
+import java.math.BigDecimal
 import java.util.concurrent.TimeUnit
+import kotlin.math.abs
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
@@ -52,12 +54,14 @@ object PipelineHttp {
 
     /**
      * Sends the request and returns the body. HTTP errors become a PipelineError like
-     * "Could not list your voices (401): Invalid API key".
+     * "Could not list your voices (401): Invalid API key". `explanations` replaces the service's own
+     * message for particular statuses, such as 402 for a plan that doesn't include a feature.
      */
-    suspend fun send(request: Request, failure: String): ByteArray = withContext(Dispatchers.IO) {
+    suspend fun send(request: Request, failure: String, explanations: Map<Int, String> = emptyMap()): ByteArray = withContext(Dispatchers.IO) {
         try {
             client.newCall(request).execute().use { response ->
                 val body = response.body?.bytes() ?: ByteArray(0)
+                explanations[response.code]?.let { throw PipelineError(it) }
                 if (response.code >= 400) {
                     throw PipelineError("$failure (${response.code}): ${readableMessage(body)}")
                 }
@@ -80,6 +84,9 @@ object PipelineHttp {
             // ElevenLabs: {"detail": {"message": "..."}} or {"detail": "..."}
             parsed.obj("detail")?.str("message")?.let { return it }
             parsed.str("detail")?.let { return it }
+            // fal.ai: {"detail": [{"msg": "...", ...}]} when an input is rejected.
+            val messages = parsed.arr("detail")?.mapNotNull { it.asObject()?.str("msg") }.orEmpty()
+            if (messages.isNotEmpty()) return messages.joinToString(" ")
         }
         return text.take(500)
     }
@@ -115,8 +122,9 @@ fun jsonOf(value: Any?): JsonElement = when (value) {
 }
 
 /**
- * JSON written the way the iPhone app writes meta.json: keys sorted, two-space indents and
- * `"key" : value`, so the files stay easy to compare across both apps.
+ * JSON written the way the iPhone app writes meta.json: keys sorted, two-space indents,
+ * `"key" : value`, and numbers as Swift writes them, so the same recording gives the same bytes
+ * on both apps.
  */
 fun prettyJson(element: JsonElement, indent: String = ""): String {
     val inner = "$indent  "
@@ -125,6 +133,27 @@ fun prettyJson(element: JsonElement, indent: String = ""): String {
             .joinToString(",\n", "{\n", "\n$indent}") { (key, value) -> "$inner${JsonPrimitive(key)} : ${prettyJson(value, inner)}" }
         is JsonArray -> if (element.isEmpty()) "[\n\n$indent]" else element
             .joinToString(",\n", "[\n", "\n$indent]") { "$inner${prettyJson(it, inner)}" }
-        else -> element.toString()
+        is JsonPrimitive -> if (!element.isString && element.content.any { it == '.' || it == 'e' || it == 'E' }) {
+            element.content.toDoubleOrNull()?.let(::swiftNumber) ?: element.toString()
+        } else element.toString()
     }
+}
+
+/**
+ * A number as Swift's JSONEncoder writes it: whole numbers without ".0" ("10", not "10.0"), the
+ * shortest digits that read back the same, and an exponent like "1e-05" only for very small or
+ * very large numbers.
+ */
+fun swiftNumber(value: Double): String {
+    if (value.isNaN() || value.isInfinite()) return value.toString()
+    if (value == Math.rint(value) && abs(value) < 1e16) return if (value == 0.0) "0" else value.toLong().toString()
+    val decimal = BigDecimal(value.toString()).stripTrailingZeros()
+    val digits = decimal.unscaledValue().abs().toString()
+    val exponent = digits.length - 1 - decimal.scale()
+    val sign = if (value < 0) "-" else ""
+    if (exponent < -4 || exponent >= 16) {
+        val mantissa = if (digits.length == 1) digits else "${digits[0]}.${digits.substring(1)}"
+        return sign + mantissa + "e" + (if (exponent < 0) "-" else "+") + abs(exponent).toString().padStart(2, '0')
+    }
+    return sign + decimal.abs().toPlainString()
 }

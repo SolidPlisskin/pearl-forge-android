@@ -1,0 +1,67 @@
+[
+  {
+    "headers" : {
+      "Authorization" : "Key test-fal-key",
+      "Content-Length" : "55",
+      "Content-Type" : "application/json",
+      "X-Fal-Object-Lifecycle" : "{\"expiration_duration_seconds\":86400}"
+    },
+    "json" : {
+      "content_type" : "image/jpeg",
+      "file_name" : "avatar.jpg"
+    },
+    "method" : "POST",
+    "url" : "https://rest.fal.ai/storage/upload/initiate?storage_type=fal-cdn-v3"
+  },
+  {
+    "body_base64" : "/9j/4AECAw==",
+    "headers" : {
+      "Content-Length" : "7",
+      "Content-Type" : "image/jpeg"
+    },
+    "method" : "PUT",
+    "url" : "https://upload.example.com/slot/1"
+  },
+  {
+    "headers" : {
+      "Authorization" : "Key test-fal-key",
+      "Content-Length" : "53",
+      "Content-Type" : "application/json",
+      "X-Fal-Object-Lifecycle" : "{\"expiration_duration_seconds\":86400}"
+    },
+    "json" : {
+      "content_type" : "audio/mp4",
+      "file_name" : "pearl.m4a"
+    },
+    "method" : "POST",
+    "url" : "https://rest.fal.ai/storage/upload/initiate?storage_type=fal-cdn-v3"
+  },
+  {
+    "body_base64" : "SUQzBAUG",
+    "headers" : {
+      "Content-Length" : "6",
+      "Content-Type" : "audio/mp4"
+    },
+    "method" : "PUT",
+    "url" : "https://upload.example.com/slot/2"
+  },
+  {
+    "headers" : {
+      "Authorization" : "Key test-fal-key",
+      "Content-Length" : "327",
+      "Content-Type" : "application/json",
+      "X-Fal-Object-Lifecycle-Preference" : "{\"expiration_duration_seconds\":604800}"
+    },
+    "json" : {
+      "audio_url" : "https://v3.fal.media/files/b/pearl.m4a",
+      "image_url" : "https://v3.fal.media/files/a/avatar.jpg",
+      "prompt" : "A person speaking directly to the camera with a calm, natural expression and subtle head movement. Hands and arms stay still and out of view. Steady framing, no camera movement.",
+      "resolution" : "720p"
+    },
+    "method" : "POST",
+    "url" : "https://queue.fal.run/fal-ai/creatify/aurora"
+  },
+  {
+    "error" : "fal.ai couldn't start the video (422): Image too small. Audio too long."
+  }
+]

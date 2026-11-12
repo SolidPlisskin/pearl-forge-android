@@ -16,6 +16,8 @@ enum class ForgeStep(val progressLabel: String) {
 object Forge {
     /** Reads a saved key; set when the app starts. */
     var credentials: (Credential) -> String? = { null }
+    /** Where the AI services are reached; tests point this at a stand-in server. */
+    internal var serviceBase: String? = null
 
     suspend fun transcribe(audio: File): String = elevenLabs().transcribe(audio)
 
@@ -34,8 +36,14 @@ object Forge {
     }
 
     /** Translates text into a language with the chosen AI, keeping its meaning. */
-    suspend fun translate(text: String, language: SpeechLanguage, choice: PolisherChoice): Refinement {
-        val reply = complete(TranslationPrompt.system(language), text, choice, "Translation failed")
+    suspend fun translate(text: String, language: SpeechLanguage, choice: PolisherChoice): Refinement =
+        translate(text, TranslationPrompt.system(language), choice)
+
+    /** A pearl written in another language, in English, so you can tell what it says. */
+    suspend fun english(text: String, choice: PolisherChoice): String = translate(text, TranslationPrompt.english, choice).text
+
+    private suspend fun translate(text: String, system: String, choice: PolisherChoice): Refinement {
+        val reply = complete(system, text, choice, "Translation failed")
         if (reply.stopReason == "refusal") throw PipelineError("${choice.provider.displayName} declined to translate this.")
         if (reply.wasCutOff) throw PipelineError("The translation was cut off before the end. Try a shorter text.")
         if (reply.text.isEmpty()) throw PipelineError("The translation came back empty. Please try again.")
@@ -75,16 +83,21 @@ object Forge {
 
     private fun anthropic(provider: PolisherProvider): AnthropicClient {
         val key = credentials(provider.credential) ?: throw PipelineError("Add your ${provider.displayName} key in the AI tab first.")
-        return AnthropicClient(key, credentials(Credential.ANTHROPIC_WORKSPACE_ID))
+        return AnthropicClient(key, credentials(Credential.ANTHROPIC_WORKSPACE_ID), serviceBase ?: PipelineConfig.ANTHROPIC_BASE)
     }
 
     private fun compatible(provider: PolisherProvider): OpenAICompatibleClient {
         val key = credentials(provider.credential) ?: throw PipelineError("Add your ${provider.displayName} key in the AI tab first.")
-        return OpenAICompatibleClient(provider, key)
+        return OpenAICompatibleClient(provider, key, serviceBase ?: provider.compatibleBase)
     }
 
-    private fun elevenLabs(): ElevenLabsClient {
+    fun elevenLabs(): ElevenLabsClient {
         val key = credentials(Credential.ELEVENLABS_KEY) ?: throw PipelineError("Add your ElevenLabs key in Settings first.")
         return ElevenLabsClient(key)
+    }
+
+    fun fal(): FalClient {
+        val key = credentials(Credential.FAL_KEY) ?: throw PipelineError("Add your fal.ai key in Settings first.")
+        return FalClient(key)
     }
 }

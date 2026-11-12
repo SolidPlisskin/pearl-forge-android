@@ -2,6 +2,7 @@ package com.solidplisskin.pearlforge.settings
 
 import android.content.Context
 import android.content.SharedPreferences
+import android.net.Uri
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
 import android.util.Base64
@@ -12,12 +13,16 @@ import androidx.compose.runtime.setValue
 import androidx.core.content.edit
 import com.solidplisskin.pearlforge.pipeline.AIModel
 import com.solidplisskin.pearlforge.pipeline.AnthropicClient
+import com.solidplisskin.pearlforge.pipeline.AvatarVideo
 import com.solidplisskin.pearlforge.pipeline.Credential
 import com.solidplisskin.pearlforge.pipeline.ElevenLabsClient
+import com.solidplisskin.pearlforge.pipeline.FalClient
 import com.solidplisskin.pearlforge.pipeline.OpenAICompatibleClient
 import com.solidplisskin.pearlforge.pipeline.PipelineConfig
 import com.solidplisskin.pearlforge.pipeline.PolisherChoice
+import com.solidplisskin.pearlforge.pipeline.PipelineError
 import com.solidplisskin.pearlforge.pipeline.PolisherProvider
+import com.solidplisskin.pearlforge.pipeline.VideoModel
 import com.solidplisskin.pearlforge.pipeline.Voice
 import com.solidplisskin.pearlforge.pipeline.VoiceCredits
 import java.security.KeyStore
@@ -25,9 +30,11 @@ import javax.crypto.Cipher
 import javax.crypto.KeyGenerator
 import javax.crypto.SecretKey
 import javax.crypto.spec.GCMParameterSpec
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.withContext
 
 /** Whether a saved key has been checked against its service. */
 sealed interface KeyStatus {
@@ -80,9 +87,14 @@ class CredentialStore(context: Context) {
     }
 }
 
-/** The ElevenLabs key, the account's voices, the chosen voice, and the plan's credits. */
+/**
+ * The ElevenLabs and fal.ai keys, the account's voices, the chosen voice, the plan's credits, and
+ * what makes videos. Keys are encrypted; the choices aren't secret, so they're plain settings.
+ */
 class SettingsModel(context: Context, private val store: CredentialStore) {
     private val prefs = context.getSharedPreferences("settings", Context.MODE_PRIVATE)
+    private val resolver = context.contentResolver
+    private val pictureFolder = context.filesDir
 
     var elevenLabsStatus by mutableStateOf(if (store.read(Credential.ELEVENLABS_KEY) == null) KeyStatus.NotSet else KeyStatus.Saved)
         private set
@@ -96,6 +108,24 @@ class SettingsModel(context: Context, private val store: CredentialStore) {
     /** Remembered so the chosen voice can be named before the voice list has loaded. */
     var selectedVoiceName by mutableStateOf(prefs.getString("selectedVoiceName", "") ?: "")
         private set
+    /** A picture of your ElevenLabs avatar, for making video pearls. */
+    var avatarPicture by mutableStateOf(AvatarVideo.picture(pictureFolder))
+        private set
+    var falStatus by mutableStateOf(if (store.read(Credential.FAL_KEY) == null) KeyStatus.NotSet else KeyStatus.Saved)
+        private set
+    /** Your fal.ai balance in dollars, when the key may read it. */
+    var falBalance by mutableStateOf<Double?>(null)
+        private set
+    /** What makes videos of your avatar. */
+    var videoModelId by mutableStateOf(VideoModel.withId(prefs.getString(AvatarVideo.CHOSEN_MODEL_KEY, null)).id)
+        private set
+
+    val videoModel: VideoModel get() = VideoModel.withId(videoModelId)
+
+    fun chooseVideoModel(model: VideoModel) {
+        videoModelId = model.id
+        prefs.edit { putString(AvatarVideo.CHOSEN_MODEL_KEY, model.id) }
+    }
 
     fun selectVoice(voice: Voice) {
         selectedVoiceId = voice.id
@@ -103,9 +133,10 @@ class SettingsModel(context: Context, private val store: CredentialStore) {
         prefs.edit { putString("selectedVoiceID", voice.id); putString("selectedVoiceName", voice.name) }
     }
 
-    /** Checks the saved key if it hasn't been checked yet this launch. */
+    /** Checks the saved keys if they haven't been checked yet this launch. */
     suspend fun checkSavedKeys() {
         if (elevenLabsStatus == KeyStatus.Saved) loadVoices()
+        if (falStatus == KeyStatus.Saved) checkFalKey()
     }
 
     suspend fun saveElevenLabsKey(key: String) {
@@ -141,6 +172,56 @@ class SettingsModel(context: Context, private val store: CredentialStore) {
     suspend fun refreshCredits() {
         val key = store.read(Credential.ELEVENLABS_KEY) ?: run { credits = null; return }
         credits = runCatching { ElevenLabsClient(key).credits() }.getOrNull()
+    }
+
+    // fal.ai
+
+    suspend fun saveFalKey(key: String) {
+        store.save(key, Credential.FAL_KEY)
+        falStatus = KeyStatus.Saved
+        falBalance = null
+        checkFalKey()
+    }
+
+    fun removeFalKey() {
+        store.delete(Credential.FAL_KEY)
+        falStatus = KeyStatus.NotSet
+        falBalance = null
+    }
+
+    /** Reading the balance doubles as the fal.ai key check. */
+    suspend fun checkFalKey() {
+        val key = store.read(Credential.FAL_KEY) ?: run { falStatus = KeyStatus.NotSet; return }
+        falStatus = KeyStatus.Checking
+        try {
+            falBalance = FalClient(key).balance()
+            falStatus = KeyStatus.Works
+        } catch (error: Exception) {
+            falStatus = KeyStatus.Failed(error.message ?: "The key didn't work.")
+        }
+    }
+
+    /** Reads your fal.ai balance again; quietly unknown if the key isn't allowed to read billing. */
+    suspend fun refreshFalBalance() {
+        val key = store.read(Credential.FAL_KEY) ?: run { falBalance = null; return }
+        falBalance = runCatching { FalClient(key).balance() }.getOrNull()
+    }
+
+    // Video avatar
+
+    /** Saves a picture chosen with the photo picker as your avatar. */
+    suspend fun setAvatarPicture(uri: Uri) {
+        withContext(Dispatchers.IO) {
+            val data = resolver.openInputStream(uri)?.use { it.readBytes() }
+                ?: throw PipelineError("That picture couldn't be opened. Try saving it again as a photo.")
+            AvatarVideo.savePicture(data, pictureFolder)
+        }
+        avatarPicture = AvatarVideo.picture(pictureFolder)
+    }
+
+    fun removeAvatarPicture() {
+        AvatarVideo.removePicture(pictureFolder)
+        avatarPicture = null
     }
 }
 

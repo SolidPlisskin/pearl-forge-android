@@ -1,0 +1,62 @@
+{
+  "categories" : [
+    "Books & Stories"
+  ],
+  "created" : "2025-11-07T10:19:51Z",
+  "favorite" : false,
+  "pearls" : [
+    {
+      "created" : "2025-11-07T10:39:51Z",
+      "id" : "00000000-0000-4000-8000-000000000000",
+      "mode" : "summarize",
+      "number" : 3,
+      "text_file" : "pearl-03-summarize.txt",
+      "video_cost" : 0.30000000000000004
+    },
+    {
+      "created" : "2025-11-07T10:39:51Z",
+      "id" : "00000000-0000-4000-8000-000000000001",
+      "mode" : "summarize",
+      "number" : 3,
+      "text_file" : "pearl-03-summarize.txt",
+      "video_cost" : 1e-05
+    },
+    {
+      "created" : "2025-11-07T10:39:51Z",
+      "id" : "00000000-0000-4000-8000-000000000002",
+      "mode" : "summarize",
+      "number" : 3,
+      "text_file" : "pearl-03-summarize.txt",
+      "video_cost" : 1234567
+    },
+    {
+      "created" : "2025-11-07T10:39:51Z",
+      "id" : "00000000-0000-4000-8000-000000000003",
+      "mode" : "summarize",
+      "number" : 3,
+      "text_file" : "pearl-03-summarize.txt",
+      "video_cost" : 100.25
+    },
+    {
+      "created" : "2025-11-07T10:39:51Z",
+      "id" : "00000000-0000-4000-8000-000000000004",
+      "mode" : "summarize",
+      "number" : 3,
+      "text_file" : "pearl-03-summarize.txt",
+      "video_cost" : 1e+21
+    },
+    {
+      "created" : "2025-11-07T10:39:51Z",
+      "id" : "00000000-0000-4000-8000-000000000005",
+      "mode" : "summarize",
+      "number" : 3,
+      "text_file" : "pearl-03-summarize.txt",
+      "video_cost" : 0.000123
+    }
+  ],
+  "references" : [
+
+  ],
+  "title" : "Hélas, onzante-et-un ans parmi des hobbits si excellents et si admirables ! Je n",
+  "typed" : true
+}

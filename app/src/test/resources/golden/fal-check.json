@@ -1,0 +1,39 @@
+[
+  {
+    "headers" : {
+      "Authorization" : "Key test-fal-key"
+    },
+    "method" : "GET",
+    "url" : "https://queue.fal.run/fal-ai/kling-video/requests/req-1/status"
+  },
+  {
+    "returned" : "working"
+  },
+  {
+    "headers" : {
+      "Authorization" : "Key test-fal-key"
+    },
+    "method" : "GET",
+    "url" : "https://queue.fal.run/fal-ai/kling-video/requests/req-1/status"
+  },
+  {
+    "headers" : {
+      "Authorization" : "Key test-fal-key"
+    },
+    "method" : "GET",
+    "url" : "https://queue.fal.run/fal-ai/kling-video/requests/req-1"
+  },
+  {
+    "returned" : "https://v3.fal.media/files/c/output.mp4"
+  },
+  {
+    "headers" : {
+      "Authorization" : "Key test-fal-key"
+    },
+    "method" : "GET",
+    "url" : "https://queue.fal.run/fal-ai/bytedance/requests/req-2/status"
+  },
+  {
+    "error" : "fal.ai couldn't make the video: The picture has no face. Failed videos aren't charged."
+  }
+]
